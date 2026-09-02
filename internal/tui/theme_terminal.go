@@ -29,11 +29,25 @@ type terminalSurface struct {
 
 var detectedSurface terminalSurface
 
-// DetectTerminalColors reads the terminal's own colors, once, at launch. A
+// detectedKittyGraphics is whether the terminal answered that it draws them.
+var detectedKittyGraphics bool
+
+// DetectTerminalCapabilities asks the terminal about itself, once, at launch. A
 // query after tcell owns the tty would read the keyboard out from under it.
-func DetectTerminalColors() {
-	background, foreground, ok := queryTerminalColors()
-	detectedSurface = terminalSurface{background: background, foreground: foreground, known: ok}
+func DetectTerminalCapabilities() {
+	reply := queryTerminal()
+	detectedSurface = terminalSurface{
+		background: reply.background,
+		foreground: reply.foreground,
+		known:      reply.colorsKnown,
+	}
+	detectedKittyGraphics = reply.kittyGraphics
+}
+
+// KittyGraphicsSupported reports what the launch probe found. It is false until
+// DetectTerminalCapabilities has run, and off unix always.
+func KittyGraphicsSupported() bool {
+	return detectedKittyGraphics
 }
 
 // TerminalTheme is built from the terminal: ANSI slots for the hues, the

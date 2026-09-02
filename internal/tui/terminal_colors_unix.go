@@ -7,38 +7,38 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
-// queryTerminalColors asks the terminal for its own background and foreground,
-// false when nothing answers. It goes raw, so it must run before tcell's own.
-func queryTerminalColors() (background, foreground tcell.Color, ok bool) {
+// queryTerminal asks the terminal about itself: its own background and
+// foreground, and whether it draws Kitty graphics. It goes raw, so it must run
+// before tcell's own.
+func queryTerminal() terminalReply {
 	termName := os.Getenv("TERM")
 	if termName == "" || strings.HasPrefix(termName, "dumb") {
-		return tcell.ColorDefault, tcell.ColorDefault, false
+		return terminalReply{}
 	}
 
 	// /dev/tty rather than stdin, so a piped or redirected stream still reaches
 	// the terminal the user is sitting at.
 	fd, err := unix.Open("/dev/tty", unix.O_RDWR|unix.O_NOCTTY, 0)
 	if err != nil {
-		return tcell.ColorDefault, tcell.ColorDefault, false
+		return terminalReply{}
 	}
 	defer func() { _ = unix.Close(fd) }()
 
 	if !term.IsTerminal(fd) {
-		return tcell.ColorDefault, tcell.ColorDefault, false
+		return terminalReply{}
 	}
 	state, err := term.MakeRaw(fd)
 	if err != nil {
-		return tcell.ColorDefault, tcell.ColorDefault, false
+		return terminalReply{}
 	}
 	defer func() { _ = term.Restore(fd, state) }()
 
-	if _, err := unix.Write(fd, []byte(oscColorQuery)); err != nil {
-		return tcell.ColorDefault, tcell.ColorDefault, false
+	if _, err := unix.Write(fd, []byte(terminalQuery)); err != nil {
+		return terminalReply{}
 	}
 
 	deadline := time.Now().Add(terminalQueryTimeout)
@@ -58,7 +58,14 @@ func queryTerminalColors() (background, foreground tcell.Color, ok bool) {
 			break
 		}
 	}
-	return parseTerminalColors(reply.String())
+	answer := reply.String()
+	background, foreground, colorsKnown := parseTerminalColors(answer)
+	return terminalReply{
+		background:    background,
+		foreground:    foreground,
+		colorsKnown:   colorsKnown,
+		kittyGraphics: parseKittyGraphics(answer),
+	}
 }
 
 // waitForTTYData reports whether the terminal answered before the deadline. The

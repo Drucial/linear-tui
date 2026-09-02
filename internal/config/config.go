@@ -36,6 +36,9 @@ const (
 	DensityComfortable    = "comfortable"
 	DensityCompact        = "compact"
 	DefaultDensity        = DensityComfortable
+	ImagesAuto            = "auto"
+	ImagesOff             = "off"
+	DefaultImages         = ImagesAuto
 	DefaultAgentProvider  = "cursor"
 	DefaultAgentSandbox   = "enabled"
 )
@@ -103,6 +106,10 @@ type Config struct {
 
 	// RoundedBorders draws pane borders with rounded corners.
 	RoundedBorders bool
+
+	// Images draws a description's images in the details pane when the
+	// terminal can (auto), or never (off).
+	Images string
 
 	// AgentProvider selects the agent CLI provider (cursor or claude).
 	AgentProvider string

@@ -153,6 +153,41 @@ func TestLoadSettingsParsesRoundedBorders(t *testing.T) {
 	}
 }
 
+// TestLoadSettingsParsesImages verifies the setting defaults to auto and that
+// an explicit off in the file survives.
+func TestLoadSettingsParsesImages(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{name: "absent takes the default", data: `{}`, want: ImagesAuto},
+		{name: "empty takes the default", data: `{"images": ""}`, want: ImagesAuto},
+		{name: "off is kept", data: `{"images": "off"}`, want: ImagesOff},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			settingsPath := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(settingsPath, []byte(test.data), 0644); err != nil {
+				t.Fatalf("write settings file: %v", err)
+			}
+
+			settings, err := LoadSettings(settingsPath)
+			if err != nil {
+				t.Fatalf("LoadSettings() error: %v", err)
+			}
+			cfg, err := ConfigFromSettings("test-key", settings)
+			if err != nil {
+				t.Fatalf("ConfigFromSettings() error: %v", err)
+			}
+			if cfg.Images != test.want {
+				t.Errorf("Config.Images = %q, want %q", cfg.Images, test.want)
+			}
+		})
+	}
+}
+
 // TestLoadSettingsParsesSessionRestore verifies the flag defaults to on and
 // that an explicit false in the file survives, which is what the pointer field
 // on SettingsFile buys.
@@ -254,6 +289,13 @@ func TestConfigFromSettingsValidation(t *testing.T) {
 		name   string
 		mutate func(Settings) Settings
 	}{
+		{
+			name: "invalid images",
+			mutate: func(settings Settings) Settings {
+				settings.Images = "sixel"
+				return settings
+			},
+		},
 		{
 			name: "invalid timeout",
 			mutate: func(settings Settings) Settings {
