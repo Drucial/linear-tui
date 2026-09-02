@@ -51,6 +51,7 @@ func (a *App) renderDetailsPage() {
 		// The pane's top padding is text now, so the message carries its own.
 		a.detailsPageView.SetText(strings.Repeat("\n", a.density.DetailsPadding.Top) + a.emptyDetailsMessage())
 		a.detailsPage.setSlots(nil)
+		a.detailsPage.setImages(nil)
 		return
 	}
 
@@ -118,6 +119,7 @@ func (a *App) renderDetailsPage() {
 	}
 	a.detailsPageView.SetText(strings.Join(lines, "\n") + a.trailingPad())
 	a.detailsPage.setSlots(slots)
+	a.detailsPage.setImages(header.images)
 }
 
 // blockCard renders one block of the page and reports the widgets that go in
