@@ -68,6 +68,19 @@ func (a *App) beginImageFrame() {
 	a.pendingImages = nil
 }
 
+// imagesWanted is the pictures the terminal should be showing.
+//
+// A picture is a layer the terminal owns, above the cells rather than in them,
+// so an overlay drawn after the details pane does not cover it — it came out
+// over the settings modal. Nothing is placed while one is up, and the delete
+// pass takes down whatever already was.
+func (a *App) imagesWanted() []screenImage {
+	if a.activeModal() != nil {
+		return nil
+	}
+	return a.pendingImages
+}
+
 // recordImages takes the pictures a draw wants. The draw itself must not write
 // to the tty: it runs under tcell's own lock, and the widgets have not flushed.
 func (a *App) recordImages(images []screenImage) {
@@ -95,8 +108,10 @@ func (a *App) drawImages(screen tcell.Screen) {
 		}
 	}
 
+	pending := a.imagesWanted()
+
 	wanted := map[uint32]screenImage{}
-	for _, image := range a.pendingImages {
+	for _, image := range pending {
 		wanted[image.id] = image
 	}
 
@@ -120,7 +135,7 @@ func (a *App) drawImages(screen tcell.Screen) {
 		return
 	}
 
-	for _, image := range a.pendingImages {
+	for _, image := range pending {
 		if _, already := state.placed[image.id]; already {
 			// Unmoved, so the terminal is still drawing it. The lock is set
 			// again because a resize reallocates the cell buffer and drops it.

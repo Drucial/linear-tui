@@ -35,6 +35,32 @@ func TestAFrameWithoutTheDetailsPaneAsksForNoPictures(t *testing.T) {
 	}
 }
 
+// A picture is above the cells rather than in them, so an overlay drawn after
+// the details pane does not cover it: the settings modal opened with the
+// screenshot sitting on top of it. Every modal is reached through the same
+// registry, so the whole class is one check.
+func TestNoPictureIsPlacedWhileAnOverlayIsUp(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pendingImages = []screenImage{{id: 1, path: "shot.png", x: 4, y: 6, cols: 40, rows: 10}}
+
+	if got := app.imagesWanted(); len(got) != 1 {
+		t.Fatalf("%d pictures wanted with no overlay up, want 1", len(got))
+	}
+
+	app.ShowSettingsModal()
+	if app.activeModal() == nil {
+		t.Fatal("the settings modal did not open")
+	}
+	if got := app.imagesWanted(); len(got) != 0 {
+		t.Errorf("%d pictures wanted with the settings modal up, want none", len(got))
+	}
+
+	app.settingsModal.Hide()
+	if got := app.imagesWanted(); len(got) != 1 {
+		t.Errorf("%d pictures wanted after the modal closed, want 1 back", len(got))
+	}
+}
+
 // The page scrolls under the pictures, so this is where one is dropped rather
 // than moved. A picture is taken whole or not at all: the terminal scales into
 // exactly the box it is given, so a shortened box would squash it a little more
