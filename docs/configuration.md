@@ -14,7 +14,8 @@ timeout reconnect and pull everything again, since they are the only settings
 that make what is already on screen wrong; the list you are on, the issue you
 had open, your filters and your search survive everything else. When one of the
 three does change, the list and the issue you were on come back after the
-reload.
+reload. A new page size applies to the next fetch rather than reloading the
+list under you.
 
 ## A config file
 
