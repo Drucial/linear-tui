@@ -83,8 +83,7 @@ type App struct {
 	// description rendered, so a refit re-joins them without rebuilding either.
 	detailsHeaderRows []detailsRow
 	detailsBodyLines  []string
-	// detailsBodyImages is where the description's pictures landed in those
-	// lines, counted from the body's own first row.
+	// Counted from the body's own first row, rebased onto the page on emit.
 	detailsBodyImages []pageImage
 	// Kept raw as well as rendered: glamour sizes tables to the width it was
 	// handed, so a width change has to re-run it.
@@ -96,15 +95,12 @@ type App struct {
 	// detailsFieldSpans is where each editable field landed in the last render,
 	// the way commentSpans is for the cards.
 	detailsFieldSpans []fieldSpan
-	// graphics is what the terminal is currently drawing and pendingImages what
-	// the last draw asked for. They are apart because a draw may not write to
-	// the tty: the after-draw handler is the only thing that may.
+	// Apart because a draw may not write to the tty: the after-draw handler is
+	// the only thing that may.
 	graphics      *graphicsState
 	pendingImages []screenImage
-	// imageStore fetches a description's pictures, imageCache is what the app
-	// has asked for keyed by URL, and imageIDs hands out the terminal's handle
-	// on each. An id must outlive the page it was drawn on: the terminal still
-	// holds the bytes it names.
+	// An id must outlive the page it was drawn on: the terminal still holds the
+	// bytes it names.
 	imageStore *images.Store
 	imageCache map[string]*loadedImage
 	imageIDs   uint32
@@ -461,8 +457,8 @@ func (a *App) Run() error {
 		a.loading.stop()
 	}
 	a.cancelStatusFlash()
-	// A placement the terminal still holds outlives the app and sits over
-	// whatever the shell draws next.
+	// Belt and braces: quit already clears, but a loop error does not go
+	// through it.
 	a.clearImages()
 	// Every quit path ends here with the event loop stopped, so the snapshot
 	// is settled and no queued update can move it. Recorded on a loop error
@@ -709,8 +705,7 @@ func (a *App) applySettings(newCfg config.Config) {
 		UseBearer:      a.apiUseBearer,
 		OnUnauthorized: a.apiOnUnauthorized,
 	}, newCfg.CacheTTL)
-	// a.config is already newCfg, so this reads the images setting just saved
-	// as well as the credentials just switched to.
+	// a.config is already newCfg, so this reads the setting just saved.
 	a.rebuildImageStore(newCfg.LinearAPIKey, a.apiUseBearer)
 
 	logger.Debug("tui.app: resetting cached state after settings change")
@@ -751,9 +746,8 @@ func (a *App) resetCachedState() {
 		a.rebuildContentLayout()
 	}
 	a.currentUser = nil
-	// The pictures go with the issue they illustrated. The terminal keeps a
-	// placement until it is told otherwise, and the cache is keyed by URL, not
-	// by workspace, so a token that no longer works must not answer from it.
+	// The cache is keyed by URL, not by workspace, so a token that no longer
+	// works must not answer from it.
 	a.clearImages()
 	a.imageCache = nil
 	a.teamUsers = nil
@@ -876,8 +870,7 @@ func (a *App) buildLayout() {
 		return false
 	})
 
-	// The pictures the details page asked for, put on the terminal after the
-	// primitives have drawn and before tcell flushes them.
+	// After the primitives have drawn and before tcell flushes them.
 	a.app.SetAfterDrawFunc(a.drawImages)
 
 	// Add main layout to pages

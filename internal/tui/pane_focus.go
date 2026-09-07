@@ -246,8 +246,8 @@ func (a *App) openPalette() {
 	a.updateFocus()
 }
 
-// paletteOpen reports whether the palette overlay is up. Its page is always
-// added, so presence says nothing and the visible pages are what answer.
+// Its page is always added, so presence says nothing and only the visible pages
+// answer. activeModal cannot see it for that reason.
 func (a *App) paletteOpen() bool {
 	for _, name := range a.pages.GetPageNames(true) {
 		if name == "palette" {

@@ -8,28 +8,23 @@ import (
 	"github.com/praxis-labs-io/zen-linear/internal/logger"
 )
 
-// The details page records where its pictures landed; this is what puts them on
-// the terminal.
-//
-// It runs from Application.SetAfterDrawFunc, which tview calls once the
-// primitives have drawn and before screen.Show flushes them. That is the only
-// window that works: the graphic goes out first, then tcell writes the cells it
-// has been told to skip.
+// The details page records where its pictures landed; this puts them on the
+// terminal, from SetAfterDrawFunc. That is the only window that works: tview
+// calls it once the primitives have drawn and before screen.Show, so the
+// graphic goes out first and tcell then writes the cells it was told to skip.
 //
 // It writes to screen.Tty rather than os.Stdout, so the bytes are ordered
-// against tcell's own output instead of racing it. The simulation screen has no
-// tty, which is what makes every existing test see none of this.
+// against tcell's own output instead of racing it.
 
-// defaultCellPixels is the cell shape assumed before the terminal has been
-// asked. Two rows to a column is close enough to hold an aspect ratio at the
-// first frame, and the real numbers arrive on the frame after.
+// The cell shape assumed before the terminal has been asked. The real numbers
+// arrive on the frame after.
 const (
 	defaultCellWidth  = 8
 	defaultCellHeight = 16
 )
 
-// placementKey names one drawing of one image. Both halves are needed: the
-// same upload twice in a description shares its bytes and not its placement.
+// Both halves are needed: the same upload twice in a description shares its
+// bytes and not its placement.
 type placementKey struct {
 	image     uint32
 	placement uint32
@@ -39,21 +34,15 @@ func keyOf(image screenImage) placementKey {
 	return placementKey{image: image.id, placement: image.placement}
 }
 
-// graphicsState is what the terminal is currently showing, so a frame that
-// changed nothing writes nothing.
 type graphicsState struct {
 	protocol graphicsProtocol
-	// sent is the images the terminal already holds bytes for, by id.
-	sent map[uint32]bool
-	// placed is where each placement is currently drawn.
-	placed map[placementKey]screenImage
-	// cellWidth and cellHeight are one cell in pixels, which is what turns an
-	// image's own aspect ratio into a count of rows.
+	sent     map[uint32]bool
+	placed   map[placementKey]screenImage
+	// One cell in pixels, which turns an image's aspect ratio into rows.
 	cellWidth  int
 	cellHeight int
-	// screen is the one the last frame drew on, kept because tview hands the
-	// screen to a draw handler and exposes it nowhere else, and a teardown that
-	// runs outside a draw still has placements to take down.
+	// Kept because tview hands the screen to a draw handler and exposes it
+	// nowhere else, and a teardown outside a draw still has placements to drop.
 	screen tcell.Screen
 }
 
@@ -67,29 +56,16 @@ func newGraphicsState() *graphicsState {
 	}
 }
 
-// beginImageFrame drops what the last frame asked for, before anything draws.
-//
-// A frame the details page does not draw at all is the case this exists for:
-// the pane is unmounted by `v`, by the zoom, and by the medium and narrow
-// layouts, and `contentFlex.Clear` means its Draw never runs. Left standing,
-// the last frame's list is placed again over whatever now occupies those cells.
-// Clearing here makes "nothing asked" the default, so every unmount path
-// corrects itself rather than each one having to remember.
+// Cleared before anything draws, so a frame where the details page does not
+// draw at all asks for nothing rather than re-placing the last frame's list.
+// Every unmount path goes through contentFlex.Clear and so corrects itself.
 func (a *App) beginImageFrame() {
 	a.pendingImages = nil
 }
 
-// imagesWanted is the pictures the terminal should be showing.
-//
-// A picture is a layer the terminal owns, above the cells rather than in them,
-// so an overlay drawn after the details pane does not cover it — it came out
-// over the settings modal. Nothing is placed while one is up, and the delete
-// pass takes down whatever already was.
-//
-// The palette is asked for separately because it is not a modal in the
-// dispatch sense: its page is added once and shown and hidden, where every
-// entry in modalBindings is added by the modal that owns it. activeModal reads
-// the page's presence, so it cannot see this one.
+// A picture is a layer above the cells, so an overlay drawn after the details
+// pane does not cover it. The palette is asked for separately: its page is
+// added once and shown and hidden, so activeModal cannot see it.
 func (a *App) imagesWanted() []screenImage {
 	if a.activeModal() != nil || a.paletteOpen() {
 		return nil
@@ -97,30 +73,25 @@ func (a *App) imagesWanted() []screenImage {
 	return a.pendingImages
 }
 
-// quit takes the pictures down and stops the application.
-//
 // The teardown cannot wait until Run returns: Stop finalizes the screen, which
-// closes the tty, so a delete written after it goes nowhere. Ghostty drops a
-// placement when the alternate screen is left and hid this, but that is the
-// terminal being tidy rather than the app being correct.
+// closes the tty, so a delete written after it goes nowhere.
 func (a *App) quit() {
 	a.clearImages()
 	a.app.Stop()
 }
 
-// recordImages takes the pictures a draw wants. The draw itself must not write
-// to the tty: it runs under tcell's own lock, and the widgets have not flushed.
+// The draw itself must not write to the tty: it runs under tcell's own lock,
+// and the widgets have not flushed.
 func (a *App) recordImages(images []screenImage) {
 	a.pendingImages = images
 }
 
-// drawImages is the after-draw handler. Every failure is silent — a picture
-// that would not draw is not worth a message, and the text under it still says
-// what the description said.
+// Every failure is silent: the text under a picture still says what the
+// description said.
 func (a *App) drawImages(screen tcell.Screen) {
+	// No tty means the simulation screen, so every test sees none of this.
 	tty, ok := screen.Tty()
 	if !ok {
-		// The simulation screen, so a test. Nothing to draw on.
 		return
 	}
 	state := a.graphics
@@ -142,8 +113,8 @@ func (a *App) drawImages(screen tcell.Screen) {
 		wanted[keyOf(image)] = image
 	}
 
-	// Gone or moved: the placement is dropped before anything new is drawn, so
-	// two copies of one picture are never on screen at once.
+	// Gone or moved, dropped before anything new is drawn so two copies of one
+	// picture are never on screen at once.
 	for key, was := range state.placed {
 		if now, still := wanted[key]; still && now == was {
 			continue
@@ -152,8 +123,8 @@ func (a *App) drawImages(screen tcell.Screen) {
 			logger.Debug("tui.graphics: delete image id=%d placement=%d error=%v", key.image, key.placement, err)
 		}
 		delete(state.placed, key)
-		// The cells under it go back to tcell, or the text that replaces the
-		// picture is never painted.
+		// The cells go back to tcell, or the text replacing the picture is
+		// never painted.
 		screen.LockRegion(was.x, was.y, was.cols, was.rows, false)
 	}
 
@@ -164,8 +135,8 @@ func (a *App) drawImages(screen tcell.Screen) {
 
 	for _, image := range pending {
 		if _, already := state.placed[keyOf(image)]; already {
-			// Unmoved, so the terminal is still drawing it. The lock is set
-			// again because a resize reallocates the cell buffer and drops it.
+			// Locked again because a resize reallocates the cell buffer and
+			// drops every lock on it.
 			screen.LockRegion(image.x, image.y, image.cols, image.rows, true)
 			continue
 		}
@@ -192,9 +163,8 @@ func (a *App) drawImages(screen tcell.Screen) {
 	}
 }
 
-// clearImages takes every placement off the terminal. Leaving the issue, an
-// image turned off, and quitting all go through here: a placement nothing
-// deletes is a picture stranded over whatever the terminal shows next.
+// A placement nothing deletes is a picture stranded over whatever the terminal
+// shows next.
 func (a *App) clearImages() {
 	state := a.graphics
 	if state == nil || len(state.placed) == 0 {
@@ -218,18 +188,12 @@ func (a *App) clearImages() {
 	a.pendingImages = nil
 }
 
-// imageBox is the cell box an image of this shape draws in, given the widest it
-// may be. It is what the description reserves rows for and what the placement
-// scales into, so both read it from here.
+// The box the description reserves rows for and the placement scales into, so
+// both read it from here.
 //
-// Past the row cap the box is narrowed rather than the rows clipped: the
-// terminal scales the picture into exactly the box it is given, so keeping the
-// full width and fewer rows would squash it.
-//
-// maxRows is clamped against the pane by the caller as well as the constant,
-// the way the details chooser clamps its own row cap: visibleImages drops a
-// picture that does not fit whole, so rows reserved past the pane's height are
-// blank forever.
+// Past the cap the box is narrowed rather than the rows clipped: the terminal
+// scales into exactly the box it is given, so fewer rows at full width squash
+// the picture.
 func (s *graphicsState) imageBox(maxCols, maxRows, width, height int) (cols, rows int) {
 	if maxCols <= 0 || maxRows <= 0 || width <= 0 || height <= 0 || s.cellWidth <= 0 || s.cellHeight <= 0 {
 		return 0, 0
@@ -253,8 +217,7 @@ func (s *graphicsState) imageBox(maxCols, maxRows, width, height int) (cols, row
 	return cols, rows
 }
 
-// ceilDiv divides and rounds up, so a picture is never given fewer cells than
-// it covers and cut off by a rounding.
+// Rounds up, so a picture is never given fewer cells than it covers.
 func ceilDiv(numerator, denominator int) int {
 	if denominator <= 0 {
 		return 0
@@ -263,12 +226,10 @@ func ceilDiv(numerator, denominator int) int {
 }
 
 const (
-	// maxImageRows caps a picture's height so one screenshot cannot bury the
-	// description it illustrates.
+	// So one screenshot cannot bury the description it illustrates.
 	maxImageRows = 15
 
-	// minImageRows is the least a picture is worth drawing in. Under it the
-	// description keeps the link instead: a few rows show nothing anyone can
-	// read, and a picture the pane cannot fit whole is never placed at all.
+	// Under this the description keeps the link: a picture the pane cannot fit
+	// whole is never placed, and reserved rows would stay blank.
 	minImageRows = 6
 )

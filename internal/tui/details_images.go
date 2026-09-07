@@ -16,28 +16,20 @@ import (
 	"github.com/praxis-labs-io/zen-linear/internal/logger"
 )
 
-// A description's pictures are drawn where they sit. Glamour has no idea a
-// terminal can draw one, so the image is taken out of the markdown before it
-// runs and a sentinel is left in its place; the sentinel's line is then swapped
-// for the rows the picture needs and a caption under them.
+// Glamour has no idea a terminal can draw a picture, so an image is taken out
+// of the markdown before it runs and its sentinel's line swapped for blank rows
+// and a caption. Anything left as markdown keeps the link glamour draws, which
+// is the fallback for every case a picture cannot be drawn.
 //
-// Only an image standing alone on its own line is taken. Glamour word-wraps, so
-// a sentinel inside a sentence could land anywhere on any line, and there is
-// nothing to swap. One inside a sentence keeps the link glamour already draws,
-// which is also the fallback for every picture that will not load.
-
-// descriptionImagePattern matches an image standing alone on its line, which is
-// how Linear writes an upload.
+// Only an image alone on its line is taken: glamour word-wraps, so a sentinel
+// inside a sentence could land anywhere and there would be nothing to swap.
 var descriptionImagePattern = regexp.MustCompile(`(?m)^[ \t]*!\[([^\]]*)\]\(([^)\s]+)\)[ \t]*$`)
 
-// imageSentinel is what an image is replaced by before glamour runs. It is one
-// unbroken token, so no wrap can split it, and it is rare enough that a real
-// description cannot contain it by accident.
+// One unbroken token, so no wrap can split it.
 func imageSentinel(index int) string {
 	return fmt.Sprintf("⟦zli-image-%d⟧", index)
 }
 
-// imageState is how far along one picture is.
 type imageState int
 
 const (
@@ -46,16 +38,14 @@ const (
 	imageFailed
 )
 
-// loadedImage is one picture the app knows about, kept by URL for as long as
-// the app runs. The id is the terminal's handle on it, so it must not change
-// while the terminal still holds the bytes.
+// Kept by URL for the life of the app: the id is the terminal's handle on the
+// bytes, so it must not change while the terminal still holds them.
 type loadedImage struct {
 	id    uint32
 	state imageState
 	image images.Image
 }
 
-// descriptionImage is one picture in the description being rendered.
 type descriptionImage struct {
 	url       string
 	caption   string
@@ -63,19 +53,14 @@ type descriptionImage struct {
 	placement uint32
 }
 
-// imagesEnabled reports whether pictures are drawn at all. The store is built
-// only where they would be, so its presence is the whole answer and the setting
-// and the launch probe are read in one place: rebuildImageStore.
+// The store is built only where pictures would be drawn, so the setting and the
+// launch probe are read in one place: rebuildImageStore.
 func (a *App) imagesEnabled() bool {
 	return a.imageStore != nil
 }
 
-// rebuildImageStore points the store at the credentials in force. It is built
-// only where it would be used: a terminal that cannot draw, or a reader who
-// turned pictures off, has no reason to be given a cache directory.
-//
-// A store that will not build is not an error the reader is told about. The
-// descriptions render the way they always have.
+// A store that will not build is not reported: descriptions render the way they
+// always have.
 func (a *App) rebuildImageStore(token string, useBearer bool) {
 	a.imageStore = nil
 	a.imageCache = nil
@@ -91,24 +76,21 @@ func (a *App) rebuildImageStore(token string, useBearer bool) {
 	a.imageStore = store
 }
 
-// describedImages pulls the pictures out of the markdown and returns what is
-// left for glamour, with a sentinel where each taken picture was. A picture the
-// app has not seen before starts loading here.
+// Returns what is left for glamour, with a sentinel where each picture was. A
+// picture the app has not seen before starts loading here.
 func (a *App) describedImages(markdown string) (string, []descriptionImage) {
 	if !a.imagesEnabled() || a.imageRowBudget() <= 0 {
 		return markdown, nil
 	}
 
 	var found []descriptionImage
-	// One placement per drawing, counted per upload: a description carrying the
-	// same picture twice shares the bytes and not the placement.
+	// The same picture twice shares its bytes and not its placement.
 	drawings := map[string]uint32{}
 
 	lines := strings.Split(markdown, "\n")
 	fenced := false
 	for i, line := range lines {
-		// A picture inside a fence is part of the sample, and swapping it for
-		// blank rows breaks the thing the fence exists to show verbatim.
+		// A picture inside a fence is part of the sample it exists to show.
 		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			fenced = !fenced
 			continue
@@ -125,8 +107,6 @@ func (a *App) describedImages(markdown string) (string, []descriptionImage) {
 
 		loaded := a.loadImage(url)
 		if loaded == nil || loaded.state == imageFailed {
-			// Left as markdown, so glamour draws the name and the link exactly
-			// as it does for a terminal that cannot show pictures at all.
 			continue
 		}
 
@@ -143,14 +123,12 @@ func (a *App) describedImages(markdown string) (string, []descriptionImage) {
 	return strings.Join(lines, "\n"), found
 }
 
-// imageCaption is what is written under the picture: the alt text the author
-// gave it, or the file it came from.
 func imageCaption(alt, url string) string {
 	if trimmed := strings.TrimSpace(alt); trimmed != "" {
 		return trimmed
 	}
-	// The URL's own path, not the whole string: path.Base of a URL ending in a
-	// slash answers with the host.
+	// The path, not the whole string: path.Base of a URL ending in a slash
+	// answers with the host.
 	if parsed, err := neturl.Parse(url); err == nil {
 		if name := path.Base(parsed.Path); name != "" && name != "." && name != "/" {
 			return name
@@ -159,8 +137,7 @@ func imageCaption(alt, url string) string {
 	return "Image"
 }
 
-// loadImage returns what the app knows about a URL, starting a fetch the first
-// time it is asked. Nil means pictures are off.
+// Nil means pictures are off.
 func (a *App) loadImage(url string) *loadedImage {
 	if a.imageStore == nil {
 		return nil
@@ -183,16 +160,14 @@ func (a *App) loadImage(url string) *loadedImage {
 		a.QueueUpdateDraw(func() {
 			if err != nil {
 				loaded.state = imageFailed
-				// An off-host URL is not a failure worth a line in the log: it
-				// is a link in a description, and most of them are.
+				// An off-host URL is just a link in a description.
 				if !errors.Is(err, images.ErrUnsupportedHost) {
 					logger.Debug("tui.images: fetch failed url=%s error=%v", url, err)
 				}
 			} else {
 				loaded.state, loaded.image = imageReady, fetched
 			}
-			// The issue moved on while this was in flight, so the page being
-			// drawn says nothing about this picture.
+			// The issue moved on while this was in flight.
 			if a.detailsIssueID != issueID {
 				return
 			}
@@ -203,9 +178,8 @@ func (a *App) loadImage(url string) *loadedImage {
 	return loaded
 }
 
-// redrawDetailsBody re-renders the description and the page around it at the
-// width already fitted. refitDetailsPage cannot do this: it skips a width it
-// has laid out at, and nothing about the width has changed.
+// refitDetailsPage cannot do this: it skips a width it has already laid out at,
+// and nothing about the width has changed.
 func (a *App) redrawDetailsBody() {
 	if a.detailsFittedWidth <= 0 {
 		return
@@ -216,12 +190,8 @@ func (a *App) redrawDetailsBody() {
 	a.detailsPageView.ScrollTo(row, column)
 }
 
-// reserveImageRows swaps each sentinel's line for the rows its picture needs and
-// a caption under them, and reports where those rows landed in the lines given.
-//
-// The rows are counted against lines, not held apart: every span and slot on the
-// page is len(lines) where it is emitted, so a count kept elsewhere would have
-// to be recomputed on every refit.
+// The rows are counted into lines rather than held apart: every span and slot
+// on the page is len(lines) where it is emitted.
 func (a *App) reserveImageRows(lines []string, found []descriptionImage, width int) ([]string, []pageImage) {
 	if len(found) == 0 {
 		return lines, nil
@@ -263,22 +233,15 @@ func (a *App) reserveImageRows(lines []string, found []descriptionImage, width i
 	return out, placements
 }
 
-// imageRowBudget is the tallest a picture may be drawn here: the cap, and never
-// more than the pane can show at once. visibleImages drops one that does not fit
-// whole, so rows reserved past the pane's height would stay blank forever.
-//
-// Zero means do not draw at all. A pane with less than minImageRows to spare
-// cannot show a picture worth looking at, and reserving rows for one that never
-// places leaves a hole where the link used to be, which is worse than the link.
-//
-// Before the first draw the pane has no measured height, and the cap stands
-// alone; the refit that follows re-lays the page against the real one.
+// The cap, and never more than the pane can show at once: visibleImages drops a
+// picture that does not fit whole, so rows past the pane's height stay blank.
+// Zero means keep the link instead, which beats a hole where the link was.
 func (a *App) imageRowBudget() int {
+	// Before the first draw there is no measured height; the refit re-lays it.
 	if a.detailsFittedHeight <= 0 {
 		return maxImageRows
 	}
-	// The caption sits under the picture and the pane wants a row of its own
-	// above the fold, so the height is not spent to the last cell.
+	// Two rows left for the caption and the fold.
 	budget := a.detailsFittedHeight - 2
 	if budget < minImageRows {
 		return 0
@@ -289,13 +252,10 @@ func (a *App) imageRowBudget() int {
 	return budget
 }
 
-// imageCaptionLine is the line under a picture, in the shade a comment's byline
-// takes: it names the picture rather than being part of the prose.
 func (a *App) imageCaptionLine(caption string, width int) string {
 	return fitTagged(a.themeTags.SecondaryText+tview.Escape(caption)+"[-]", width)
 }
 
-// sentinelIndex reports which picture a line stands for, if any.
 func sentinelIndex(line string, count int) (int, bool) {
 	for index := range count {
 		if strings.Contains(line, imageSentinel(index)) {

@@ -29,7 +29,6 @@ type terminalSurface struct {
 
 var detectedSurface terminalSurface
 
-// detectedKittyGraphics is whether the terminal answered that it draws them.
 var detectedKittyGraphics bool
 
 // DetectTerminalCapabilities asks the terminal about itself, once, at launch. A
@@ -44,8 +43,7 @@ func DetectTerminalCapabilities() {
 	detectedKittyGraphics = reply.kittyGraphics
 }
 
-// KittyGraphicsSupported reports what the launch probe found. It is false until
-// DetectTerminalCapabilities has run, and off unix always.
+// False until DetectTerminalCapabilities has run, and off unix always.
 func KittyGraphicsSupported() bool {
 	return detectedKittyGraphics
 }

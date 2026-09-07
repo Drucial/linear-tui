@@ -6,11 +6,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// A frame the details page does not draw is the case that stranded a picture
-// over the issue list: `v`, the zoom, and the medium and narrow layouts all
-// unmount the pane through contentFlex.Clear, so its Draw never runs and the
-// last frame's list stood. The after-draw handler places whatever is pending,
-// so pending has to be empty when nothing asked.
+// A frame the details page does not draw stranded a picture over the issue
+// list: every unmount path goes through contentFlex.Clear, so its Draw never
+// runs and the last frame's list stood.
 func TestAFrameWithoutTheDetailsPaneAsksForNoPictures(t *testing.T) {
 	app := newUXTestApp(t)
 
@@ -35,10 +33,8 @@ func TestAFrameWithoutTheDetailsPaneAsksForNoPictures(t *testing.T) {
 	}
 }
 
-// A picture is above the cells rather than in them, so an overlay drawn after
-// the details pane does not cover it: the settings modal opened with the
-// screenshot sitting on top of it. Every modal is reached through the same
-// registry, so the whole class is one check.
+// A picture is above the cells, so an overlay drawn after the details pane does
+// not cover it. Every modal goes through one registry, so this is the class.
 func TestNoPictureIsPlacedWhileAnOverlayIsUp(t *testing.T) {
 	app := newUXTestApp(t)
 	app.pendingImages = []screenImage{{id: 1, path: "shot.png", x: 4, y: 6, cols: 40, rows: 10}}
@@ -61,10 +57,8 @@ func TestNoPictureIsPlacedWhileAnOverlayIsUp(t *testing.T) {
 	}
 }
 
-// The page scrolls under the pictures, so this is where one is dropped rather
-// than moved. A picture is taken whole or not at all: the terminal scales into
-// exactly the box it is given, so a shortened box would squash it a little more
-// on every row scrolled.
+// Taken whole or not at all: the terminal scales into exactly the box it is
+// given, so a shortened box squashes the picture.
 func TestVisibleImagesTakeTheScrollOffset(t *testing.T) {
 	page := &detailsPage{
 		images: []pageImage{

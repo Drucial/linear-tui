@@ -2,9 +2,7 @@
 // keeps them on disk, so the details pane has bytes to draw and dimensions to
 // reserve rows for.
 //
-// It is separate from internal/linearapi on purpose. That client's transport is
-// wrapped for GraphQL — retries, a rate-limit budget, a replayable context —
-// and none of it means anything for a file download.
+// Separate from internal/linearapi, whose transport is wrapped for GraphQL.
 package images
 
 import (
@@ -22,80 +20,57 @@ import (
 	"path/filepath"
 	"time"
 
-	// The decoder for the one format kept. Registration is process-wide and
-	// another package importing image/jpeg would quietly widen what decodes
-	// here, so the format is checked by name below rather than by what happens
-	// to be registered.
+	// Registration is process-wide, so the format is checked by name below
+	// rather than by whatever happens to be registered.
 	_ "image/png"
 
 	"github.com/praxis-labs-io/zen-linear/internal/config"
 )
 
 const (
-	// requestTimeout bounds a single fetch. A screenshot is not worth holding
-	// a details pane open for.
 	requestTimeout = 20 * time.Second
-
-	// maxBytes is the largest image the store will keep. Linear caps an upload
-	// well below this; the limit is here so a wrong URL cannot fill a disk.
+	// So a wrong URL cannot fill a disk. Linear caps an upload well below it.
 	maxBytes = 10 << 20
-
-	// defaultMaxAge is how long a cached image is kept. It is a cache, so an
-	// old entry is discarded rather than revalidated.
+	// A cache, so an old entry is discarded rather than revalidated.
 	defaultMaxAge = 30 * 24 * time.Hour
-
-	// dirName is the store's directory under the application directory.
-	dirName = "images"
+	dirName       = "images"
 )
 
-// uploadHost is the only host the Linear token is ever sent to. A description
-// can point at any URL on the internet, and attaching a live credential to a
-// request for one would hand it over.
+// The only host the Linear token is ever sent to. A description can point at
+// any URL on the internet, and a live credential on a request for one would
+// hand it over.
 const uploadHost = "uploads.linear.app"
 
-// ErrUnsupportedHost is returned for a URL the store will not fetch. The caller
-// leaves that image as the link it already renders.
+// The caller leaves an image it names as the link it already renders.
 var ErrUnsupportedHost = errors.New("images: not a Linear upload")
 
-// keptFormat is the only format stored. PNG is the one encoded format the Kitty
-// graphics protocol accepts (f=100; its others are raw pixels), and a picture
-// the terminal cannot be handed must not be measured: rows would be reserved
-// for it and the link it replaced is already gone, while q=2 means the
-// terminal's refusal never comes back to say so.
+// The one encoded format Kitty accepts (f=100; its others are raw pixels). A
+// picture the terminal cannot be handed must not be measured: rows would be
+// reserved for it, its link is already gone, and q=2 means the terminal's
+// refusal never comes back to say so.
 const keptFormat = "png"
 
-// Image is a picture on disk and the size it draws at.
+// A picture on disk and the pixels it draws at.
 type Image struct {
-	// Path is the file holding the bytes, ready to be sent to the terminal.
-	Path string
-	// Width and Height are the image's own pixels.
+	Path   string
 	Width  int
 	Height int
 }
 
-// Options is what a store needs. Only Token is required; Client, CacheDir, Now
-// and MaxAge exist so tests never reach Linear or a real home directory.
+// Only Token is required. Host, CacheDir, Client, MaxAge and Now exist so tests
+// never reach Linear or a real home directory.
 type Options struct {
-	// Token authenticates the download. An upload URL answers 401 without it.
+	// An upload URL answers 401 without it.
 	Token string
-	// UseBearer prefixes the token with "Bearer " (OAuth). A personal API key
-	// leaves this false, the way linearapi.ClientConfig does.
+	// OAuth prefixes the token with "Bearer "; a personal API key does not.
 	UseBearer bool
-	// Host overrides the only host the token is sent to. Empty means the real
-	// upload host.
-	Host string
-	// CacheDir overrides where images are kept. Empty means the application
-	// directory's own.
-	CacheDir string
-	// Client overrides the HTTP client. Nil means one bounded by requestTimeout.
-	Client *http.Client
-	// MaxAge overrides how long an entry is kept. Zero means defaultMaxAge.
-	MaxAge time.Duration
-	// Now overrides the clock, so a test can age an entry without waiting.
-	Now func() time.Time
+	Host      string
+	CacheDir  string
+	Client    *http.Client
+	MaxAge    time.Duration
+	Now       func() time.Time
 }
 
-// Store fetches images and keeps them under one directory.
 type Store struct {
 	token     string
 	useBearer bool
@@ -104,9 +79,8 @@ type Store struct {
 	client    *http.Client
 }
 
-// NewStore prepares the cache directory and prunes what has aged out of it. A
-// directory it cannot create is an error: without one there is nowhere to put
-// the bytes the terminal is handed.
+// A directory it cannot create is an error: there is nowhere to put the bytes
+// the terminal is handed.
 func NewStore(opts Options) (*Store, error) {
 	dir := opts.CacheDir
 	if dir == "" {
@@ -117,10 +91,9 @@ func NewStore(opts Options) (*Store, error) {
 		dir = filepath.Join(base, dirName)
 	}
 
-	// config.EnsureDirFor tightens only the application directory itself, and
-	// this is a directory under it holding one workspace's private pictures, so
-	// the mode is set here. A chmod refusal is not fatal, for the reason given
-	// there: not every filesystem a home directory sits on implements it.
+	// EnsureDirFor tightens only the application directory itself, and this one
+	// under it holds a workspace's private pictures. A chmod refusal is not
+	// fatal: not every filesystem a home directory sits on implements it.
 	if err := os.MkdirAll(dir, config.DirMode); err != nil {
 		return nil, fmt.Errorf("create image cache directory: %w", err)
 	}
@@ -157,8 +130,6 @@ func NewStore(opts Options) (*Store, error) {
 	return store, nil
 }
 
-// Fetch returns the image at raw, from the cache when it is there and from
-// Linear when it is not.
 func (s *Store) Fetch(ctx context.Context, raw string) (Image, error) {
 	if err := s.allowed(raw); err != nil {
 		return Image{}, err
@@ -189,7 +160,7 @@ func (s *Store) Fetch(ctx context.Context, raw string) (Image, error) {
 	return Image{Path: path, Width: header.Width, Height: header.Height}, nil
 }
 
-// allowed reports whether the store will attach the token to this URL.
+// Whether the store will attach the token to this URL.
 func (s *Store) allowed(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil {
@@ -201,7 +172,6 @@ func (s *Store) allowed(raw string) error {
 	return nil
 }
 
-// download asks Linear for the bytes, bounded in both time and size.
 func (s *Store) download(ctx context.Context, raw string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -228,8 +198,8 @@ func (s *Store) download(ctx context.Context, raw string) ([]byte, error) {
 		return nil, fmt.Errorf("images: fetch %s: %s", raw, resp.Status)
 	}
 
-	// One byte past the cap, so a file at exactly the limit still reads whole
-	// and anything larger is refused rather than silently truncated.
+	// One past the cap, so a file at the limit reads whole and anything larger
+	// is refused rather than truncated.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("images: read %s: %w", raw, err)
@@ -241,9 +211,9 @@ func (s *Store) download(ctx context.Context, raw string) ([]byte, error) {
 	return data, nil
 }
 
-// cached reads an entry back. Its dimensions are re-read from the file's own
-// header rather than an index beside it: DecodeConfig stops at the header, and
-// an index is a second file to keep in step with the first.
+// Dimensions are re-read from the file's header rather than an index beside it:
+// DecodeConfig stops at the header, and an index is a second file to keep in
+// step with the first.
 func (s *Store) cached(path string) (Image, bool) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -258,8 +228,7 @@ func (s *Store) cached(path string) (Image, bool) {
 	return Image{Path: path, Width: header.Width, Height: header.Height}, true
 }
 
-// prune drops entries that have aged out. Every failure is ignored: a cache
-// that could not be tidied still answers.
+// Failures are ignored: a cache that could not be tidied still answers.
 func (s *Store) prune(now time.Time, maxAge time.Duration) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -279,15 +248,12 @@ func (s *Store) prune(now time.Time, maxAge time.Duration) {
 	}
 }
 
-// cacheName is the file an URL is kept under. The hash is what keeps a name
-// out of the path: an upload URL carries workspace and issue ids.
+// Hashed because an upload URL carries workspace and issue ids.
 func cacheName(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
 
-// writeCache stores the bytes, at the mode every other file this app writes
-// under the application directory uses.
 func writeCache(path string, data []byte) error {
 	if err := config.WriteFileAtomic(path, data, 0o600); err != nil {
 		return fmt.Errorf("images: cache %s: %w", path, err)

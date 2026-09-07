@@ -27,13 +27,12 @@ type pageSlot struct {
 	width     int
 }
 
-// pageImage is a picture's place on the page, in the same rows and columns a
-// slot uses. It is not a widget: nothing about it is drawn here, because a
-// graphic goes to the terminal as an escape sequence rather than to cells.
+// A picture's place on the page, in the rows and columns a slot uses. Not a
+// widget: a graphic goes to the terminal as an escape sequence, not to cells.
+//
+// id names the bytes the terminal holds and placement this drawing of them: one
+// description can carry the same upload twice.
 type pageImage struct {
-	// id names the bytes the terminal holds and placement names this drawing
-	// of them. One description can carry the same upload twice, and a shared
-	// placement id would leave one of them a locked blank hole.
 	id        uint32
 	placement uint32
 	path      string
@@ -43,9 +42,8 @@ type pageImage struct {
 	cols      int
 }
 
-// screenImage is a pageImage after the scroll offset, in screen cells. This is
-// what the after-draw handler places, and what it compares one frame against
-// the next to decide whether anything has to move.
+// A pageImage after the scroll offset, in screen cells. Compared frame to frame
+// to decide whether anything has to move.
 type screenImage struct {
 	id        uint32
 	placement uint32
@@ -70,9 +68,8 @@ type detailsPage struct {
 	// at, so this can be called on every frame.
 	refit func(width, height int)
 
-	// place is handed the pictures this frame wants, in screen cells. Drawing
-	// them here is not possible: they go to the tty rather than to cells, and
-	// this runs inside tcell's own draw.
+	// Drawing them here is not possible: they go to the tty rather than to
+	// cells, and this runs inside tcell's own draw.
 	place func([]screenImage)
 }
 
@@ -85,7 +82,6 @@ func newDetailsPage(view *tview.TextView, refit func(int, int), place func([]scr
 // setSlots records where the live widgets landed in the page just rendered.
 func (p *detailsPage) setSlots(slots []pageSlot) { p.slots = slots }
 
-// setImages records where the pictures landed in the page just rendered.
 func (p *detailsPage) setImages(images []pageImage) { p.images = images }
 
 // Draw paints the text and then the widgets over the holes it left for them.
@@ -146,10 +142,9 @@ func (p *detailsPage) Draw(screen tcell.Screen) {
 	p.place(p.visibleImages(x+gutter, y, height, top))
 }
 
-// visibleImages is this frame's pictures in screen cells. A picture is dropped
-// rather than clipped when it does not fit whole: the terminal scales an image
-// into the box it is given, so a shortened box would squash it a little more on
-// every row scrolled instead of sliding it under the border.
+// A picture is dropped rather than clipped when it does not fit whole: the
+// terminal scales into the box it is given, so a shortened box would squash it
+// a little more on every row scrolled.
 func (p *detailsPage) visibleImages(x, y, height, top int) []screenImage {
 	if len(p.images) == 0 {
 		return nil

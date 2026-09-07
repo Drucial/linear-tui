@@ -358,8 +358,7 @@ func (a *App) detailsHeaderBlock(width int) detailsHeader {
 		for _, line := range a.detailsBodyLines {
 			lines = append(lines, pad+line)
 		}
-		// The picture rows were counted against the body alone, so they are
-		// rebased onto the page here, where the body's own first row is known.
+		// Rebased onto the page here, where the body's first row is known.
 		for _, image := range a.detailsBodyImages {
 			image.row += start
 			image.column += indent
@@ -434,8 +433,7 @@ func (a *App) renderDetailsBody(width int) {
 		a.detailsBodyImages = nil
 		return
 	}
-	// The pictures come out before glamour runs, since it has no idea a terminal
-	// can draw one, and their rows go back in after the wrap.
+	// Out before glamour runs, rows back in after the wrap.
 	markdown, pictures := a.describedImages(a.detailsDescriptionMarkdown)
 
 	// The Description: label is not here. It carries the field cursor, which
@@ -460,8 +458,7 @@ func (a *App) refitDetailsPage(width, height int) {
 	}
 	row, column := a.detailsPageView.GetScrollOffset()
 	// Only the width reaches glamour, and the height only through the room it
-	// leaves a picture: a pane that grew past the floor has to re-run the body
-	// to get its pictures back, and one that shrank under it to give them up.
+	// leaves a picture: crossing the floor either way has to re-run the body.
 	budget := a.imageRowBudget()
 	a.detailsFittedHeight = height
 	if width != a.detailsFittedWidth || a.imageRowBudget() != budget {

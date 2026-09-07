@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// Nothing in this repo can prove a terminal accepts these bytes, the way
-// nothing but a real run proved an agent CLI's flags. What a test can hold is
-// that the sequences do not drift, so the whole of each is pinned against a
-// literal.
+// Nothing here can prove a terminal accepts these bytes, only that they do not
+// drift, so each is pinned whole against a literal.
 func TestKittyWritesTheSequencesItMeansTo(t *testing.T) {
 	tests := []struct {
 		name string
