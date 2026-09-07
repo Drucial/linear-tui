@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+
 	"github.com/praxis-labs-io/zen-linear/internal/config"
 	"github.com/praxis-labs-io/zen-linear/internal/linearapi"
 	"github.com/praxis-labs-io/zen-linear/internal/logger"
@@ -423,4 +426,54 @@ func TestSavingANewConnectionPutsTheUserBackWhereTheyWere(t *testing.T) {
 	if got := selected.TeamID; got != "team-1" {
 		t.Errorf("selected team = %q, want %q: the reload moved the user to the configured default", got, "team-1")
 	}
+}
+
+// The nav tree is the one pane built from long-lived widgets: tview bakes a
+// node's background in when the node is made, and the recolor only ever set the
+// foreground. The reload used to rebuild the tree and re-bake it by accident,
+// so dropping the reload left the pane painted in the theme it launched under
+// until the next launch. Every row is padded to the pane's width, so that is
+// the whole pane rather than a tint behind the words.
+func TestSavingAThemeRestylesTheNavigationTree(t *testing.T) {
+	app := newUXTestApp(t)
+	app.config.Theme = config.ThemeLinear
+	app.applyThemeAndDensity()
+	app.rebuildNavigationTree([]linearapi.Team{
+		{ID: "team-1", Key: "ENG", Name: "Engineering"},
+	}, nil)
+
+	opaque := ResolveTheme(config.ThemeLinear).Background
+	if got := navNodeBackgrounds(app); len(got) != 1 || got[opaque] == 0 {
+		t.Fatalf("nav node backgrounds before the save = %v, want every node on %v", got, opaque)
+	}
+
+	cfg := app.config
+	cfg.Theme = config.ThemeRosePineMoon
+	app.applySettings(cfg)
+
+	want := ResolveTheme(config.ThemeRosePineMoon).Background
+	got := navNodeBackgrounds(app)
+	if len(got) != 1 || got[want] == 0 {
+		t.Errorf("nav node backgrounds after the save = %v, want every node on %v", got, want)
+	}
+}
+
+// navNodeBackgrounds counts the tree's nodes by the background they would draw.
+// The style is read off the node rather than the screen because a row is only
+// painted once it is expanded, and a folded row keeps its stale fill too.
+func navNodeBackgrounds(app *App) map[tcell.Color]int {
+	counts := map[tcell.Color]int{}
+	var walk func(*tview.TreeNode)
+	walk = func(node *tview.TreeNode) {
+		if node == nil {
+			return
+		}
+		_, background, _ := node.GetTextStyle().Decompose()
+		counts[background]++
+		for _, child := range node.GetChildren() {
+			walk(child)
+		}
+	}
+	walk(app.navigationTree.GetRoot())
+	return counts
 }

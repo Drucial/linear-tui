@@ -164,16 +164,33 @@ func (a *App) recolorNavigationTree() {
 	a.applyNavigationNodeColors(root)
 }
 
+// applyNavigationNodeColors restyles a row and everything under it.
+//
+// It writes the whole style rather than SetColor, which sets the foreground and
+// leaves the background where it was. tview bakes a node's background in when
+// the node is built, from the global styles as they stood then, so a row keeps
+// the background of the theme it was created under for as long as it lives.
+// Nothing here rebuilt the tree, so the pane kept its old fill until the next
+// launch: a settings save used to reach resetNavigationTree, which re-baked
+// every node by building new ones.
+//
+// Every row is padded out to the pane's width, so a stale background is not a
+// tint behind the words. It is the whole pane.
 func (a *App) applyNavigationNodeColors(node *tview.TreeNode) {
 	if node == nil {
 		return
 	}
-	ref := node.GetReference()
-	if ref == nil {
-		node.SetColor(a.theme.Accent)
-	} else if navNode, ok := ref.(*NavigationNode); ok {
-		node.SetColor(a.navRowColor(navNode))
+	style := tcell.StyleDefault.Background(a.theme.Background)
+	switch ref := node.GetReference().(type) {
+	case nil:
+		style = style.Foreground(a.theme.Accent)
+	case *NavigationNode:
+		style = style.Foreground(a.navRowColor(ref))
+	default:
+		// Not a row this knows how to color; its background is still ours.
+		style = style.Foreground(node.GetColor())
 	}
+	node.SetTextStyle(style)
 	for _, child := range node.GetChildren() {
 		a.applyNavigationNodeColors(child)
 	}
