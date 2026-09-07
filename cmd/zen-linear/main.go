@@ -215,7 +215,7 @@ func runTUI() int {
 	}
 
 	// Before NewApp resolves the theme, and before tcell owns the tty.
-	tui.DetectTerminalColors()
+	tui.DetectTerminalCapabilities()
 
 	app := tui.NewApp(clientCfg, cfg, promptTemplates)
 	// tcell clears the screen the moment it takes the tty, so the stderr line

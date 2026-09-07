@@ -195,7 +195,7 @@ func (a *App) clearNavSearch() {
 func (a *App) handleNavSearchKey(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Key() {
 	case tcell.KeyCtrlC:
-		a.app.Stop()
+		a.quit()
 		return nil
 	case tcell.KeyEscape:
 		if a.navSearchInput.GetText() != "" {

@@ -16,6 +16,7 @@ it was loaded from.
   "theme": "terminal",
   "density": "comfortable",
   "rounded_borders": true,
+  "images": "auto",
   "group_by": "status",
   "subgroup_by": "",
   "sort_by": ["status", "priority"],
@@ -44,11 +45,23 @@ Every key is optional. What is missing takes its default.
 | `theme` | `terminal` | `terminal`, `rose_pine_moon`, `linear`, `high_contrast`, `color_blind` |
 | `density` | `comfortable` | `comfortable`, `compact` |
 | `rounded_borders` | `false` | a boolean |
+| `images` | `auto` | `auto`, `off` |
 
 `terminal` takes its hues from the terminal's ANSI palette and its shades from
 the background and foreground the terminal reports at launch, so it matches
 whatever you already run. `rose_pine_moon` keeps the terminal's background
 transparent. The other three pin their colors.
+
+`images` draws the PNGs in an issue's description in place instead of listing
+their names and links. It needs a terminal that speaks the Kitty
+graphics protocol — Ghostty, Kitty, WezTerm and recent Konsole among them — and
+zen-linear asks the terminal at launch rather than guessing from `TERM`. On
+`auto` a terminal that says no gets the names and links, which is the same thing
+`off` gives everywhere, so there is nothing to see if you are unsure which you
+have. Set `off` to keep the links on a slow connection or while sharing a
+screen. A picture in any other format keeps its name and link, since PNG is the
+only encoded format the protocol carries, and so does one in a details pane too
+short to show it whole.
 
 `compact` density takes the padding out of the details pane, the modals and
 the status bar, and closes the gap between the details page's sections.

@@ -26,6 +26,7 @@ type SettingsFile struct {
 	SortBy           []string          `json:"sort_by"`
 	Columns          []string          `json:"columns"`
 	RoundedBorders   *bool             `json:"rounded_borders"`
+	Images           *string           `json:"images"`
 	Workspaces       []Workspace       `json:"workspaces"`
 	DefaultWorkspace *string           `json:"default_workspace"`
 	AgentProvider    *string           `json:"agent_provider"`
@@ -57,6 +58,7 @@ type Settings struct {
 	SortBy           []string          `json:"sort_by,omitempty"`
 	Columns          []string          `json:"columns,omitempty"`
 	RoundedBorders   bool              `json:"rounded_borders"`
+	Images           string            `json:"images"`
 	Workspaces       []Workspace       `json:"workspaces,omitempty"`
 	DefaultWorkspace string            `json:"default_workspace,omitempty"`
 	AgentProvider    string            `json:"agent_provider"`
@@ -84,6 +86,7 @@ func DefaultSettings() Settings {
 		GroupBy:        "",
 		SubgroupBy:     "",
 		RoundedBorders: false,
+		Images:         DefaultImages,
 		AgentProvider:  DefaultAgentProvider,
 		AgentSandbox:   DefaultAgentSandbox,
 		AgentModel:     "",
@@ -131,6 +134,7 @@ func SettingsFromConfig(cfg Config) Settings {
 		SortBy:           cfg.SortBy,
 		Columns:          cfg.Columns,
 		RoundedBorders:   cfg.RoundedBorders,
+		Images:           cfg.Images,
 		Workspaces:       cfg.Workspaces,
 		DefaultWorkspace: cfg.DefaultWorkspace,
 		AgentProvider:    cfg.AgentProvider,
@@ -191,6 +195,14 @@ func ConfigFromSettings(apiKey string, settings Settings) (Config, error) {
 		return Config{}, err
 	}
 
+	images := strings.TrimSpace(settings.Images)
+	if images == "" {
+		images = DefaultImages
+	}
+	if err := validateImages(images, "images"); err != nil {
+		return Config{}, err
+	}
+
 	if err := validateAgentProvider(settings.AgentProvider, "agent_provider"); err != nil {
 		return Config{}, err
 	}
@@ -238,6 +250,7 @@ func ConfigFromSettings(apiKey string, settings Settings) (Config, error) {
 		SortBy:           settings.SortBy,
 		Columns:          settings.Columns,
 		RoundedBorders:   settings.RoundedBorders,
+		Images:           images,
 		Workspaces:       settings.Workspaces,
 		DefaultWorkspace: settings.DefaultWorkspace,
 		AgentProvider:    settings.AgentProvider,
@@ -352,6 +365,9 @@ func LoadSettings(path string) (Settings, error) {
 	}
 	if file.RoundedBorders != nil {
 		settings.RoundedBorders = *file.RoundedBorders
+	}
+	if file.Images != nil {
+		settings.Images = *file.Images
 	}
 	if file.AgentProvider != nil {
 		settings.AgentProvider = *file.AgentProvider
@@ -562,6 +578,16 @@ func validateDensity(density string, label string) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid %s value %q: must be comfortable or compact", label, density)
+	}
+}
+
+// validateImages validates the allowed image values.
+func validateImages(images string, label string) error {
+	switch images {
+	case ImagesAuto, ImagesOff:
+		return nil
+	default:
+		return fmt.Errorf("invalid %s value %q: must be auto or off", label, images)
 	}
 }
 

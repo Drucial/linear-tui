@@ -27,29 +27,62 @@ type pageSlot struct {
 	width     int
 }
 
+// A picture's place on the page, in the rows and columns a slot uses. Not a
+// widget: a graphic goes to the terminal as an escape sequence, not to cells.
+//
+// id names the bytes the terminal holds and placement this drawing of them: one
+// description can carry the same upload twice.
+type pageImage struct {
+	id        uint32
+	placement uint32
+	path      string
+	row       int
+	rows      int
+	column    int
+	cols      int
+}
+
+// A pageImage after the scroll offset, in screen cells. Compared frame to frame
+// to decide whether anything has to move.
+type screenImage struct {
+	id        uint32
+	placement uint32
+	path      string
+	x, y      int
+	cols      int
+	rows      int
+}
+
 // detailsPage draws the issue and the widgets that sit inside it.
 type detailsPage struct {
 	*tview.Box
 
 	// view holds the page's text and owns the scrolling, so a card's rows and
 	// the scroll offset are measured in the same lines.
-	view  *tview.TextView
-	slots []pageSlot
+	view   *tview.TextView
+	slots  []pageSlot
+	images []pageImage
 
 	// refit re-renders the page at a new measure. The draw is the only place
 	// the live width is known; refit itself skips a width it already laid out
 	// at, so this can be called on every frame.
 	refit func(width, height int)
+
+	// Drawing them here is not possible: they go to the tty rather than to
+	// cells, and this runs inside tcell's own draw.
+	place func([]screenImage)
 }
 
-func newDetailsPage(view *tview.TextView, refit func(int, int)) *detailsPage {
-	page := &detailsPage{Box: tview.NewBox(), view: view, refit: refit}
+func newDetailsPage(view *tview.TextView, refit func(int, int), place func([]screenImage)) *detailsPage {
+	page := &detailsPage{Box: tview.NewBox(), view: view, refit: refit, place: place}
 	page.SetBackgroundColor(view.GetBackgroundColor())
 	return page
 }
 
 // setSlots records where the live widgets landed in the page just rendered.
 func (p *detailsPage) setSlots(slots []pageSlot) { p.slots = slots }
+
+func (p *detailsPage) setImages(images []pageImage) { p.images = images }
 
 // Draw paints the text and then the widgets over the holes it left for them.
 func (p *detailsPage) Draw(screen tcell.Screen) {
@@ -105,6 +138,34 @@ func (p *detailsPage) Draw(screen tcell.Screen) {
 	if !shown && p.focusedSlot() != nil {
 		screen.HideCursor()
 	}
+
+	p.place(p.visibleImages(x+gutter, y, height, top))
+}
+
+// A picture is dropped rather than clipped when it does not fit whole: the
+// terminal scales into the box it is given, so a shortened box would squash it
+// a little more on every row scrolled.
+func (p *detailsPage) visibleImages(x, y, height, top int) []screenImage {
+	if len(p.images) == 0 {
+		return nil
+	}
+	visible := make([]screenImage, 0, len(p.images))
+	for _, image := range p.images {
+		start := image.row - top
+		if start < 0 || start+image.rows > height || image.cols <= 0 || image.rows <= 0 {
+			continue
+		}
+		visible = append(visible, screenImage{
+			id:        image.id,
+			placement: image.placement,
+			path:      image.path,
+			x:         x + image.column,
+			y:         y + start,
+			cols:      image.cols,
+			rows:      image.rows,
+		})
+	}
+	return visible
 }
 
 // Focus hands the keyboard to the text view, which is the page's own content.

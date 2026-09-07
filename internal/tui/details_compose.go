@@ -284,7 +284,7 @@ func (a *App) buildDetailsPage() {
 	a.detailsPageView.SetFocusFunc(func() { a.enterDetailsFocus(detailsFocusCards) })
 	a.applyComposeTheme()
 
-	a.detailsPage = newDetailsPage(a.detailsPageView, a.refitDetailsPage)
+	a.detailsPage = newDetailsPage(a.detailsPageView, a.refitDetailsPage, a.recordImages)
 	a.detailsPage.SetBackgroundColor(a.theme.Background)
 }
 

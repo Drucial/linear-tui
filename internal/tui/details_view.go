@@ -266,6 +266,7 @@ type detailsHeader struct {
 	chooser chooserSpan
 	editor  editorSpan
 	slots   []pageSlot
+	images  []pageImage
 }
 
 // detailsHeaderBlock renders the metadata and the description at a width.
@@ -275,6 +276,7 @@ func (a *App) detailsHeaderBlock(width int) detailsHeader {
 	pad := a.density.DetailsPadding.Top
 	lines := make([]string, pad, pad+len(a.detailsHeaderRows)+len(a.detailsBodyLines)+3)
 	var spans []fieldSpan
+	var pictures []pageImage
 	// Every row shifts by the cursor gutter together, so the grid reads the same
 	// in both modes rather than jumping a column as the cursor passes.
 	indent := 0
@@ -352,8 +354,15 @@ func (a *App) detailsHeaderBlock(width int) detailsHeader {
 		// The body takes the same gutter its label does, so the block moves
 		// sideways with the mode rather than disagreeing with its own label.
 		pad := strings.Repeat(" ", indent)
+		start := len(lines)
 		for _, line := range a.detailsBodyLines {
 			lines = append(lines, pad+line)
+		}
+		// Rebased onto the page here, where the body's first row is known.
+		for _, image := range a.detailsBodyImages {
+			image.row += start
+			image.column += indent
+			pictures = append(pictures, image)
 		}
 	}
 	return detailsHeader{
@@ -362,6 +371,7 @@ func (a *App) detailsHeaderBlock(width int) detailsHeader {
 		chooser: chooser,
 		editor:  editor,
 		slots:   slots,
+		images:  pictures,
 	}
 }
 
@@ -420,15 +430,19 @@ func (a *App) renderDetailsBody(width int) {
 	width = max(0, width-detailsCursorGutter)
 	if a.detailsDescriptionMarkdown == "" {
 		a.detailsBodyLines = []string{"", fmt.Sprintf("%sNo description available[-]", a.themeTags.SecondaryText)}
+		a.detailsBodyImages = nil
 		return
 	}
+	// Out before glamour runs, rows back in after the wrap.
+	markdown, pictures := a.describedImages(a.detailsDescriptionMarkdown)
+
 	// The Description: label is not here. It carries the field cursor, which
 	// moves far more often than the width these lines are cached against.
 	lines := []string{""}
-	for _, line := range commentBodyLines(a.detailsDescriptionMarkdown, width) {
+	for _, line := range commentBodyLines(markdown, width) {
 		lines = append(lines, wrapTagged(line, width)...)
 	}
-	a.detailsBodyLines = lines
+	a.detailsBodyLines, a.detailsBodyImages = a.reserveImageRows(lines, pictures, width)
 }
 
 // refitDetailsPage re-renders the page at a pane width, keeping the scroll
@@ -443,13 +457,19 @@ func (a *App) refitDetailsPage(width, height int) {
 		return
 	}
 	row, column := a.detailsPageView.GetScrollOffset()
-	// Only the width reaches glamour. A shorter pane re-lays the page, which is
-	// what re-caps an open chooser against it.
-	if width != a.detailsFittedWidth {
+	// Only the width reaches glamour, and the height only through the room it
+	// leaves a picture: crossing the floor either way has to re-run the body.
+	// Asked only where pictures are drawn, or a height-only resize would re-wrap
+	// the whole description for a reader who has none.
+	budget := 0
+	if a.imagesEnabled() {
+		budget = a.imageRowBudget()
+	}
+	a.detailsFittedHeight = height
+	if width != a.detailsFittedWidth || (a.imagesEnabled() && a.imageRowBudget() != budget) {
 		a.detailsFittedWidth = width
 		a.renderDetailsBody(width)
 	}
-	a.detailsFittedHeight = height
 	a.renderDetailsPage()
 	a.detailsPageView.ScrollTo(row, column)
 }

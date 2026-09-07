@@ -11,6 +11,7 @@ import (
 	"github.com/praxis-labs-io/zen-linear/internal/agents"
 	"github.com/praxis-labs-io/zen-linear/internal/cache"
 	"github.com/praxis-labs-io/zen-linear/internal/config"
+	"github.com/praxis-labs-io/zen-linear/internal/images"
 	"github.com/praxis-labs-io/zen-linear/internal/linearapi"
 	"github.com/praxis-labs-io/zen-linear/internal/logger"
 	"github.com/praxis-labs-io/zen-linear/internal/session"
@@ -82,6 +83,8 @@ type App struct {
 	// description rendered, so a refit re-joins them without rebuilding either.
 	detailsHeaderRows []detailsRow
 	detailsBodyLines  []string
+	// Counted from the body's own first row, rebased onto the page on emit.
+	detailsBodyImages []pageImage
 	// Kept raw as well as rendered: glamour sizes tables to the width it was
 	// handed, so a width change has to re-run it.
 	detailsDescriptionMarkdown string
@@ -92,6 +95,15 @@ type App struct {
 	// detailsFieldSpans is where each editable field landed in the last render,
 	// the way commentSpans is for the cards.
 	detailsFieldSpans []fieldSpan
+	// Apart because a draw may not write to the tty: the after-draw handler is
+	// the only thing that may.
+	graphics      *graphicsState
+	pendingImages []screenImage
+	// An id must outlive the page it was drawn on: the terminal still holds the
+	// bytes it names.
+	imageStore *images.Store
+	imageCache map[string]*loadedImage
+	imageIDs   uint32
 	// detailsEdit is the field cursor's mode. detailsIssueID is what the page
 	// was last built for, which is what says the issue changed under it.
 	detailsEdit    detailsEditState
@@ -403,6 +415,7 @@ func NewApp(clientCfg linearapi.ClientConfig, cfg config.Config, templates []con
 		listIDToIssue:        make(map[string]*linearapi.Issue),
 		searchIDToIssue:      make(map[string]*linearapi.Issue),
 		agentPromptTemplates: templates,
+		graphics:             newGraphicsState(),
 		activeWorkspaceName:  workspaceNameForKey(cfg.Workspaces, cfg.LinearAPIKey),
 		// Details opens on demand (Enter or the palette toggle); the list
 		// gets the room.
@@ -410,6 +423,7 @@ func NewApp(clientCfg linearapi.ClientConfig, cfg config.Config, templates []con
 	}
 
 	app.linearDeps = newLinearDeps(clientCfg, cfg.CacheTTL)
+	app.rebuildImageStore(cfg.LinearAPIKey, clientCfg.UseBearer)
 	app.apiUseBearer = clientCfg.UseBearer
 	app.apiOnUnauthorized = clientCfg.OnUnauthorized
 	app.rebuildCommands()
@@ -443,6 +457,9 @@ func (a *App) Run() error {
 		a.loading.stop()
 	}
 	a.cancelStatusFlash()
+	// Belt and braces: quit already clears, but a loop error does not go
+	// through it.
+	a.clearImages()
 	// Every quit path ends here with the event loop stopped, so the snapshot
 	// is settled and no queued update can move it. Recorded on a loop error
 	// too: the user's place is worth keeping whichever way the app came down.
@@ -688,6 +705,8 @@ func (a *App) applySettings(newCfg config.Config) {
 		UseBearer:      a.apiUseBearer,
 		OnUnauthorized: a.apiOnUnauthorized,
 	}, newCfg.CacheTTL)
+	// a.config is already newCfg, so this reads the setting just saved.
+	a.rebuildImageStore(newCfg.LinearAPIKey, a.apiUseBearer)
 
 	logger.Debug("tui.app: resetting cached state after settings change")
 	a.resetCachedState()
@@ -727,6 +746,10 @@ func (a *App) resetCachedState() {
 		a.rebuildContentLayout()
 	}
 	a.currentUser = nil
+	// The cache is keyed by URL, not by workspace, so a token that no longer
+	// works must not answer from it.
+	a.clearImages()
+	a.imageCache = nil
 	a.teamUsers = nil
 	a.teamProjects = nil
 	a.workflowStates = nil
@@ -843,8 +866,12 @@ func (a *App) buildLayout() {
 	a.app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
 		width, _ := screen.Size()
 		a.watchLayoutWidth(width)
+		a.beginImageFrame()
 		return false
 	})
+
+	// After the primitives have drawn and before tcell flushes them.
+	a.app.SetAfterDrawFunc(a.drawImages)
 
 	// Add main layout to pages
 	a.pages.AddPage("main", a.mainLayout, true, true)

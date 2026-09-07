@@ -13,9 +13,11 @@ import (
 // paid once at launch by terminals that ignore the query, so it is short.
 const terminalQueryTimeout = 200 * time.Millisecond
 
-// oscColorQuery asks for the foreground (OSC 10) and background (OSC 11), then
-// for device attributes, which a terminal answers last and always.
-const oscColorQuery = "\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c"
+// The foreground (OSC 10), the background (OSC 11), whether the terminal draws
+// Kitty graphics (a=q against a 1x1 inline pixel), then device attributes,
+// which a terminal answers last and always. One probe: each costs the timeout
+// above on a terminal that stays silent.
+const terminalQuery = "\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c"
 
 // oscColorReport matches a terminal's answer: an OSC code, then components of
 // one to four hex digits each. The terminator is required, or a report still
@@ -26,9 +28,24 @@ var oscColorReport = regexp.MustCompile(`\x1b\]([0-9]{1,2});rgba?:([0-9a-fA-F]{1
 // arrives after the color reports, so seeing it means none are coming.
 var deviceAttributesReport = regexp.MustCompile(`\x1b\[\?[0-9;]*c`)
 
+// A terminal that draws them answers OK; one that refused this image answers an
+// error code, and one that does not know the protocol says nothing.
+var kittyGraphicsReport = regexp.MustCompile(`\x1b_Gi=31(?:,[^;]*)?;OK\x1b\\`)
+
+type terminalReply struct {
+	background    tcell.Color
+	foreground    tcell.Color
+	colorsKnown   bool
+	kittyGraphics bool
+}
+
 // hasDeviceAttributes reports whether the terminal has finished answering.
 func hasDeviceAttributes(reply string) bool {
 	return deviceAttributesReport.MatchString(reply)
+}
+
+func parseKittyGraphics(reply string) bool {
+	return kittyGraphicsReport.MatchString(reply)
 }
 
 // parseTerminalColors reads the foreground and background out of whatever the

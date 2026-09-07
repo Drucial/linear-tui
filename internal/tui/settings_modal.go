@@ -229,12 +229,14 @@ type SettingsModal struct {
 	themeValues         []string
 	densityField        *FormPicker
 	roundedBordersField *FormPicker
+	imagesField         *FormPicker
 	sessionRestoreField *FormPicker
 	updateCheckField    *FormPicker
 	// booleanOptions backs every on/off picker, so they read the same way.
 	booleanOptions       []string
 	densityOptions       []string
 	densityValues        []string
+	imagesOptions        []string
 	agentProviderField   *FormPicker
 	agentProviderOptions []string
 	agentSandboxField    *FormPicker
@@ -261,6 +263,7 @@ func NewSettingsModal(app *App) *SettingsModal {
 		densityValues:        []string{config.DensityComfortable, config.DensityCompact},
 		agentProviderOptions: availableProviders,
 		agentSandboxOptions:  []string{"enabled", "disabled"},
+		imagesOptions:        []string{config.ImagesAuto, config.ImagesOff},
 		booleanOptions:       []string{"enabled", "disabled"},
 		agentModelOptions:    modelLabels,
 		agentModelValues:     modelValues,
@@ -284,6 +287,9 @@ func NewSettingsModal(app *App) *SettingsModal {
 	sm.fm.EndRow()
 
 	sm.roundedBordersField = sm.fm.AddPicker("Rounded borders", sm.booleanOptions, booleanOptionIndex(false), nil)
+	sm.imagesField = sm.fm.AddPicker("Images", sm.imagesOptions, 0, nil)
+	sm.fm.EndRow()
+
 	sm.sessionRestoreField = sm.fm.AddPicker("Restore last session", sm.booleanOptions, booleanOptionIndex(true), nil)
 	sm.updateCheckField = sm.fm.AddPicker("Check for updates", sm.booleanOptions, booleanOptionIndex(true), nil)
 	sm.fm.EndRow()
@@ -330,6 +336,7 @@ func (sm *SettingsModal) Show() {
 	sm.setThemeSelection(settings.Theme)
 	sm.setDensitySelection(settings.Density)
 	sm.roundedBordersField.SetCurrentOption(booleanOptionIndex(settings.RoundedBorders))
+	sm.setImagesSelection(settings.Images)
 	sm.sessionRestoreField.SetCurrentOption(booleanOptionIndex(settings.SessionRestore))
 	sm.updateCheckField.SetCurrentOption(booleanOptionIndex(settings.UpdateCheck))
 	sm.setAgentProviderSelection(selectedProvider)
@@ -470,6 +477,11 @@ func (sm *SettingsModal) settingsFromForm() (config.Settings, error) {
 		agentProvider = config.DefaultAgentProvider
 	}
 
+	_, images := sm.imagesField.GetCurrentOption()
+	if images == "" {
+		images = config.DefaultImages
+	}
+
 	_, agentSandbox := sm.agentSandboxField.GetCurrentOption()
 	if agentSandbox == "" {
 		agentSandbox = config.DefaultAgentSandbox
@@ -498,6 +510,7 @@ func (sm *SettingsModal) settingsFromForm() (config.Settings, error) {
 		SortBy:         sm.app.config.SortBy,
 		Columns:        sm.app.config.Columns,
 		RoundedBorders: booleanOptionValue(sm.roundedBordersField),
+		Images:         images,
 		SessionRestore: booleanOptionValue(sm.sessionRestoreField),
 		UpdateCheck:    booleanOptionValue(sm.updateCheckField),
 		AgentProvider:  agentProvider,
@@ -654,6 +667,21 @@ func (sm *SettingsModal) setDensitySelection(density string) {
 		}
 	}
 	sm.densityField.SetCurrentOption(selected)
+}
+
+// setImagesSelection updates the dropdown selection to match the provided value.
+func (sm *SettingsModal) setImagesSelection(images string) {
+	selected := 0
+	for i, option := range sm.imagesOptions {
+		if option == config.DefaultImages {
+			selected = i
+		}
+		if option == images {
+			selected = i
+			break
+		}
+	}
+	sm.imagesField.SetCurrentOption(selected)
 }
 
 // setAgentProviderSelection updates the dropdown selection to match the provided provider.
