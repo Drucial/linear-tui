@@ -9,6 +9,13 @@ the session and the log always live under `~/.zen-linear`.
 The path is resolved once, at launch. The settings modal saves back to the file
 it was loaded from.
 
+Saving applies the change in place. Only the API key, the endpoint and the
+timeout reconnect and pull everything again, since they are the only settings
+that make what is already on screen wrong; the list you are on, the issue you
+had open, your filters and your search survive everything else. When one of the
+three does change, the list and the issue you were on come back after the
+reload.
+
 ## A config file
 
 ```json
