@@ -88,12 +88,6 @@ func (a *App) switchWorkspace(name string) {
 	// bearer scheme and 401 refresh carried from an OAuth session first.
 	a.apiUseBearer = false
 	a.apiOnUnauthorized = nil
-	// A switch is a connection change and nothing else: same theme, same keys,
-	// same log. It reloads outright rather than through applySettings, which
-	// reloads only when the config it is handed differs — the switch is guarded
-	// by name, so two entries naming one env var must still switch. The place a
-	// snapshot would hold belongs to the workspace being left and went to disk
-	// above, so nothing is seeded for the restore.
 	a.config.LinearAPIKey = key
 	a.reloadWorkspace()
 	// The navigation pane's title is the workspace name.

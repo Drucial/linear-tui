@@ -97,9 +97,7 @@ func TestApplySettingsPreservesOAuthBearer(t *testing.T) {
 	startReviewTestApplication(t, app)
 	refreshDone := installRefreshCompletionHook(app)
 
-	// The timeout is one of the three fields that cost a new client, so this is
-	// a save that actually rebuilds one. Applying an unchanged config would
-	// leave the launch client in place and assert nothing.
+	// A connection change, or no client is rebuilt and this asserts nothing.
 	saved := cfg
 	saved.Timeout = 45 * time.Second
 	app.applySettings(saved)
@@ -213,9 +211,7 @@ func TestApplySettingsDoesNotAdoptLoggingOffAsASetting(t *testing.T) {
 	}
 }
 
-// seedPlace fills the state a settings save used to throw away: the list the
-// user is on, the rows in front of them, their filters and the team metadata
-// already fetched for the choosers.
+// seedPlace fills the state a settings save used to throw away.
 func seedPlace(app *App) {
 	app.selectedNavigation = &NavigationNode{ID: "team-1", TeamID: "team-1", IsTeam: true, Text: "Engineering"}
 	app.issues = []linearapi.Issue{{ID: "issue-1", Identifier: "ZNL-1", Title: "On screen"}}
@@ -227,10 +223,6 @@ func seedPlace(app *App) {
 	app.groupingOverridden = true
 }
 
-// A save that changes nothing about the connection has no reason to throw away
-// what came through it. Before this, saving a theme dropped the list, the
-// selection, the filters and every cached option, and pulled the workspace
-// again over the network.
 func TestSavingAThemeKeepsWhatIsOnScreen(t *testing.T) {
 	app := newUXTestApp(t)
 	seedPlace(app)
@@ -242,7 +234,7 @@ func TestSavingAThemeKeepsWhatIsOnScreen(t *testing.T) {
 	cfg.Theme = config.ThemeLinear
 	app.applySettings(cfg)
 
-	// The save did land, so the rest is not a no-op mistaken for a pass.
+	// The save landed, so the rest is not a no-op mistaken for a pass.
 	if app.theme != ResolveTheme(config.ThemeLinear) {
 		t.Fatal("theme not applied: the save did not take")
 	}
@@ -273,9 +265,7 @@ func TestSavingAThemeKeepsWhatIsOnScreen(t *testing.T) {
 	}
 }
 
-// Rebuilding the modals shells out to the agent CLI for its model list, so an
-// unconditional rebuild put a subprocess behind every save. The modal pointers
-// are the cheapest thing that says whether it ran.
+// Rebuilding the modals shells out to the agent CLI for its model list.
 func TestSavingAPageSizeRebuildsNoModals(t *testing.T) {
 	app := newUXTestApp(t)
 
@@ -293,9 +283,7 @@ func TestSavingAPageSizeRebuildsNoModals(t *testing.T) {
 	}
 }
 
-// Reinit writes a session marker and reopens the file, so an unconditional
-// restart planted a false "the app just started" line in the user's log on
-// every save.
+// Reinit writes a session marker, so an ungated restart plants a false one.
 func TestSavingAThemeDoesNotRestartLogging(t *testing.T) {
 	isolateLogging(t)
 
@@ -320,8 +308,6 @@ func TestSavingAThemeDoesNotRestartLogging(t *testing.T) {
 	}
 }
 
-// The other side of the tier: the endpoint is one of the three settings whose
-// change invalidates everything already fetched.
 func TestSavingANewEndpointReloads(t *testing.T) {
 	app := newUXTestApp(t)
 	seedPlace(app)
@@ -344,10 +330,6 @@ func TestSavingANewEndpointReloads(t *testing.T) {
 	}
 }
 
-// A connection change is the one save that still reloads, and the reload used
-// to reopen on default_team / All Issues. The place is the user's, not the
-// connection's: it goes to the one-shot restore loadInitialData runs, so a save
-// made for one setting does not also move them.
 func TestSavingANewConnectionPutsTheUserBackWhereTheyWere(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -396,8 +378,7 @@ func TestSavingANewConnectionPutsTheUserBackWhereTheyWere(t *testing.T) {
 		LinearAPIKey: "token",
 		CacheTTL:     time.Minute,
 		PageSize:     10,
-		// The counterfactual: without the re-seed the reload falls through to
-		// this, and the user ends up on Nexa for having changed a timeout.
+		// Without the re-seed the reload falls through to this.
 		DefaultTeam: "NEX",
 	}
 	app := NewApp(linearapi.ClientConfig{Token: "token", Endpoint: server.URL}, cfg, nil)
@@ -407,10 +388,8 @@ func TestSavingANewConnectionPutsTheUserBackWhereTheyWere(t *testing.T) {
 
 	saved := cfg
 	saved.Timeout = 45 * time.Second
-	// On the event loop, where the Save button runs it. Off it, the restore
-	// this ends in repaints the status bar under the draw goroutine.
+	// On the event loop, where the Save button runs it.
 	app.app.QueueUpdate(func() {
-		// Where the user is when they open settings.
 		app.selectedNavigation = &NavigationNode{ID: "team-1", TeamID: "team-1", IsTeam: true, Text: "Engineering"}
 		app.applySettings(saved)
 	})
@@ -428,12 +407,7 @@ func TestSavingANewConnectionPutsTheUserBackWhereTheyWere(t *testing.T) {
 	}
 }
 
-// The nav tree is the one pane built from long-lived widgets: tview bakes a
-// node's background in when the node is made, and the recolor only ever set the
-// foreground. The reload used to rebuild the tree and re-bake it by accident,
-// so dropping the reload left the pane painted in the theme it launched under
-// until the next launch. Every row is padded to the pane's width, so that is
-// the whole pane rather than a tint behind the words.
+// The reload used to rebuild the tree, which re-baked every node's background.
 func TestSavingAThemeRestylesTheNavigationTree(t *testing.T) {
 	app := newUXTestApp(t)
 	app.config.Theme = config.ThemeLinear
@@ -459,8 +433,6 @@ func TestSavingAThemeRestylesTheNavigationTree(t *testing.T) {
 }
 
 // navNodeBackgrounds counts the tree's nodes by the background they would draw.
-// The style is read off the node rather than the screen because a row is only
-// painted once it is expanded, and a folded row keeps its stale fill too.
 func navNodeBackgrounds(app *App) map[tcell.Color]int {
 	counts := map[tcell.Color]int{}
 	var walk func(*tview.TreeNode)
@@ -478,9 +450,7 @@ func navNodeBackgrounds(app *App) map[tcell.Color]int {
 	return counts
 }
 
-// The image store is rebuilt only for a change to the setting that owns it.
-// Rebuilding it on every save drops imageCache, so every picture already
-// decoded is fetched and decoded again for a save about something else.
+// An ungated rebuild drops imageCache, refetching every decoded picture.
 func TestSavingSettingsRebuildsTheImageStoreOnlyForImages(t *testing.T) {
 	app := newUXTestApp(t)
 	app.imageCache = map[string]*loadedImage{"https://example.test/a.png": {}}

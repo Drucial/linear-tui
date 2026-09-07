@@ -178,9 +178,7 @@ func TestANudgeIsShownOnce(t *testing.T) {
 	}
 }
 
-// The check only ever ran from loadInitialData, which a settings save no longer
-// reaches. The setting reads as "check for updates", not "check from the next
-// launch", so turning it on has to ask now.
+// The check only ever ran from loadInitialData, which a save no longer reaches.
 func TestTurningTheCheckOnAsksWithoutWaitingForTheNextLaunch(t *testing.T) {
 	app := newUXTestApp(t)
 	app.config.UpdateCheck = false
@@ -195,9 +193,7 @@ func TestTurningTheCheckOnAsksWithoutWaitingForTheNextLaunch(t *testing.T) {
 	cfg.UpdateCheck = true
 	app.applySettings(cfg)
 
-	// The seam rather than the status bar: the check answers on its own
-	// goroutine, so what the hint line reads by now is a race with the focus
-	// restore that repaints it.
+	// The seam, not the status bar: the check answers on its own goroutine.
 	select {
 	case got := <-asked:
 		if got != "0.3.0" {
@@ -208,9 +204,6 @@ func TestTurningTheCheckOnAsksWithoutWaitingForTheNextLaunch(t *testing.T) {
 	}
 }
 
-// A save that leaves the setting on must not ask again: the answer is already
-// held on disk for the day, and a second request per save is the shape the TTL
-// exists to prevent.
 func TestASaveWithTheCheckAlreadyOnDoesNotAskAgain(t *testing.T) {
 	app := newUXTestApp(t)
 	app.config.UpdateCheck = true

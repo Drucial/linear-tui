@@ -236,11 +236,7 @@ func TestSwitchWorkspaceEmptiesTheDetailsPane(t *testing.T) {
 	}
 }
 
-// The switch reloads because it is a switch, not because the config it hands
-// over happens to differ. Routing it back through applySettings, whose diff is
-// all the config, would make two entries naming one env var a silent no-op:
-// the workspace name and the auth mode change outside the config, where no
-// diff of it can see them.
+// The switch reloads because it is a switch, not because the config differs.
 func TestSwitchWorkspaceReloadsOnASharedKey(t *testing.T) {
 	app := newSwitcherFlowTestApp(t)
 	t.Setenv("TEST_LINEAR_KEY_SIDE", "k-acme")
