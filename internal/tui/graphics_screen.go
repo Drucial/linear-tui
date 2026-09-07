@@ -56,6 +56,18 @@ func newGraphicsState() *graphicsState {
 	}
 }
 
+// beginImageFrame drops what the last frame asked for, before anything draws.
+//
+// A frame the details page does not draw at all is the case this exists for:
+// the pane is unmounted by `v`, by the zoom, and by the medium and narrow
+// layouts, and `contentFlex.Clear` means its Draw never runs. Left standing,
+// the last frame's list is placed again over whatever now occupies those cells.
+// Clearing here makes "nothing asked" the default, so every unmount path
+// corrects itself rather than each one having to remember.
+func (a *App) beginImageFrame() {
+	a.pendingImages = nil
+}
+
 // recordImages takes the pictures a draw wants. The draw itself must not write
 // to the tty: it runs under tcell's own lock, and the widgets have not flushed.
 func (a *App) recordImages(images []screenImage) {

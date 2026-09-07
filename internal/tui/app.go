@@ -872,6 +872,7 @@ func (a *App) buildLayout() {
 	a.app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
 		width, _ := screen.Size()
 		a.watchLayoutWidth(width)
+		a.beginImageFrame()
 		return false
 	})
 
