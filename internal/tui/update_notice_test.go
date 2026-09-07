@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/praxis-labs-io/zen-linear/internal/config"
 	"github.com/praxis-labs-io/zen-linear/internal/update"
 )
 
@@ -174,5 +175,60 @@ func TestANudgeIsShownOnce(t *testing.T) {
 
 	if got := statusText(app); strings.Contains(got, "v0.4.0") {
 		t.Errorf("status bar = %q, want the notice not repeated", got)
+	}
+}
+
+// The check only ever ran from loadInitialData, which a settings save no longer
+// reaches. The setting reads as "check for updates", not "check from the next
+// launch", so turning it on has to ask now.
+func TestTurningTheCheckOnAsksWithoutWaitingForTheNextLaunch(t *testing.T) {
+	app := newUXTestApp(t)
+	app.config.UpdateCheck = false
+	app.version = "0.3.0"
+	asked := make(chan string, 1)
+	app.checkUpdateFunc = func(_ context.Context, version string) (update.Result, error) {
+		asked <- version
+		return update.Result{Latest: "v0.4.0", Available: true}, nil
+	}
+
+	cfg := app.config
+	cfg.UpdateCheck = true
+	app.applySettings(cfg)
+
+	// The seam rather than the status bar: the check answers on its own
+	// goroutine, so what the hint line reads by now is a race with the focus
+	// restore that repaints it.
+	select {
+	case got := <-asked:
+		if got != "0.3.0" {
+			t.Errorf("checked version = %q, want the running one", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("turning the check on did not ask until the next launch")
+	}
+}
+
+// A save that leaves the setting on must not ask again: the answer is already
+// held on disk for the day, and a second request per save is the shape the TTL
+// exists to prevent.
+func TestASaveWithTheCheckAlreadyOnDoesNotAskAgain(t *testing.T) {
+	app := newUXTestApp(t)
+	app.config.UpdateCheck = true
+	app.version = "0.3.0"
+	asked := make(chan struct{}, 1)
+	app.checkUpdateFunc = func(context.Context, string) (update.Result, error) {
+		asked <- struct{}{}
+		return update.Result{Latest: "v0.4.0", Available: true}, nil
+	}
+
+	cfg := app.config
+	cfg.Theme = config.ThemeLinear
+	app.applySettings(cfg)
+	settle()
+
+	select {
+	case <-asked:
+		t.Error("the check ran for a save that did not turn it on")
+	default:
 	}
 }

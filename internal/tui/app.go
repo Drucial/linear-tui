@@ -712,12 +712,6 @@ func (a *App) applySettings(newCfg config.Config) {
 		a.updateDetailsView()
 	}
 
-	if newCfg.UpdateCheck && !old.UpdateCheck {
-		// loadInitialData is the only other thing that runs it, and the setting
-		// reads as "check for updates", not "check from the next launch".
-		a.startUpdateCheck()
-	}
-
 	if newCfg.LinearAPIKey != old.LinearAPIKey || newCfg.APIEndpoint != old.APIEndpoint || newCfg.Timeout != old.Timeout {
 		// Everything on screen came through the client about to be replaced, so
 		// this is the one path that pays for a reset. The place goes to the
@@ -745,6 +739,13 @@ func (a *App) applySettings(newCfg config.Config) {
 	// Rebuilding the modals re-adds their pages, and tview hands focus from an
 	// added page down to whichever pane the layout was built focused on.
 	a.restoreModalFocus()
+	if newCfg.UpdateCheck && !old.UpdateCheck {
+		// loadInitialData is the only other thing that runs it, and the setting
+		// reads as "check for updates", not "check from the next launch". After
+		// the restore for the same reason the warning is: what it reports lands
+		// on the hint line, which the restore repaints.
+		a.startUpdateCheck()
+	}
 	// After the restore, which repaints the hint line: with no reload coming,
 	// this is the only thing left to report a log path that would not open.
 	a.reportPendingWarning()

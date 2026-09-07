@@ -477,3 +477,30 @@ func navNodeBackgrounds(app *App) map[tcell.Color]int {
 	walk(app.navigationTree.GetRoot())
 	return counts
 }
+
+// The image store is rebuilt only for a change to the setting that owns it.
+// Rebuilding it on every save drops imageCache, so every picture already
+// decoded is fetched and decoded again for a save about something else.
+func TestSavingSettingsRebuildsTheImageStoreOnlyForImages(t *testing.T) {
+	app := newUXTestApp(t)
+	app.imageCache = map[string]*loadedImage{"https://example.test/a.png": {}}
+
+	themed := app.config
+	themed.Theme = config.ThemeLinear
+	app.applySettings(themed)
+
+	if len(app.imageCache) != 1 {
+		t.Errorf("imageCache = %v after a theme save, want the decoded pictures kept", app.imageCache)
+	}
+
+	off := app.config
+	off.Images = config.ImagesOff
+	app.applySettings(off)
+
+	if app.imageCache != nil {
+		t.Errorf("imageCache = %v after turning images off, want it dropped with the store", app.imageCache)
+	}
+	if app.imageStore != nil {
+		t.Error("image store still built with images off")
+	}
+}
