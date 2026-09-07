@@ -88,9 +88,8 @@ func (a *App) switchWorkspace(name string) {
 	// bearer scheme and 401 refresh carried from an OAuth session first.
 	a.apiUseBearer = false
 	a.apiOnUnauthorized = nil
-	newCfg := a.config
-	newCfg.LinearAPIKey = key
-	a.applySettings(newCfg)
+	a.config.LinearAPIKey = key
+	a.reloadWorkspace()
 	// The navigation pane's title is the workspace name.
 	a.updateAllPaneTitles()
 	a.flashSuccess(fmt.Sprintf("Switched to %s", workspace.Name))

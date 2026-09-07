@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/praxis-labs-io/zen-linear/internal/config"
 	"github.com/praxis-labs-io/zen-linear/internal/update"
 )
 
@@ -174,5 +175,53 @@ func TestANudgeIsShownOnce(t *testing.T) {
 
 	if got := statusText(app); strings.Contains(got, "v0.4.0") {
 		t.Errorf("status bar = %q, want the notice not repeated", got)
+	}
+}
+
+// The check only ever ran from loadInitialData, which a save no longer reaches.
+func TestTurningTheCheckOnAsksWithoutWaitingForTheNextLaunch(t *testing.T) {
+	app := newUXTestApp(t)
+	app.config.UpdateCheck = false
+	app.version = "0.3.0"
+	asked := make(chan string, 1)
+	app.checkUpdateFunc = func(_ context.Context, version string) (update.Result, error) {
+		asked <- version
+		return update.Result{Latest: "v0.4.0", Available: true}, nil
+	}
+
+	cfg := app.config
+	cfg.UpdateCheck = true
+	app.applySettings(cfg)
+
+	// The seam, not the status bar: the check answers on its own goroutine.
+	select {
+	case got := <-asked:
+		if got != "0.3.0" {
+			t.Errorf("checked version = %q, want the running one", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("turning the check on did not ask until the next launch")
+	}
+}
+
+func TestASaveWithTheCheckAlreadyOnDoesNotAskAgain(t *testing.T) {
+	app := newUXTestApp(t)
+	app.config.UpdateCheck = true
+	app.version = "0.3.0"
+	asked := make(chan struct{}, 1)
+	app.checkUpdateFunc = func(context.Context, string) (update.Result, error) {
+		asked <- struct{}{}
+		return update.Result{Latest: "v0.4.0", Available: true}, nil
+	}
+
+	cfg := app.config
+	cfg.Theme = config.ThemeLinear
+	app.applySettings(cfg)
+	settle()
+
+	select {
+	case <-asked:
+		t.Error("the check ran for a save that did not turn it on")
+	default:
 	}
 }

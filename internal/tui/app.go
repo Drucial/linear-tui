@@ -668,49 +668,83 @@ func (a *App) loadCurrentUser(ctx context.Context, fetchUser func(context.Contex
 
 // applySettings updates runtime dependencies to match a new configuration.
 func (a *App) applySettings(newCfg config.Config) {
-	// Rebuilding the modals re-adds their pages, and tview hands focus from an
-	// added page down to whichever pane the layout was built focused on. The
-	// restore has to be last on every exit: resetCachedState moves the active
-	// tab out from under an earlier one.
-	defer a.restoreModalFocus()
-
+	old := a.config
 	a.config = newCfg
 	// Keybindings are resolved once, when the registry is built, so a saved
 	// change to them only lands if the registry is rebuilt with it.
 	a.rebuildCommands()
-	a.applyThemeAndDensity()
 
-	logLevel := parseLogLevel(newCfg.LogLevel)
-	opened, warning := logger.Restart(newCfg.LogFile, config.DefaultLogFile(), logLevel)
-	// a.config is already newCfg; adopt the path actually opened so the settings
-	// modal names where logs really go rather than the path that was refused.
-	// Logging off is not adopted: it is where this save landed, not a setting,
-	// and writing it back would turn one bad path into logging off for good.
-	if opened != "" {
-		newCfg.LogFile = opened
-		a.config.LogFile = opened
+	if newCfg.Theme != old.Theme || newCfg.Density != old.Density || newCfg.RoundedBorders != old.RoundedBorders {
+		a.applyThemeAndDensity()
 	}
-	if warning != "" {
-		logger.Warning("tui.app: %s", warning)
-		// Held rather than shown: the reload this ends in paints the hint line
-		// back over anything set here. It surfaces when that reload settles.
-		a.pendingWarning = warning
-	}
-	logger.Debug("tui.app: settings applied log_file=%s log_level=%s", newCfg.LogFile, newCfg.LogLevel)
 
+	if newCfg.LogFile != old.LogFile || newCfg.LogLevel != old.LogLevel {
+		opened, warning := logger.Restart(newCfg.LogFile, config.DefaultLogFile(), parseLogLevel(newCfg.LogLevel))
+		// a.config is already newCfg; adopt the path actually opened so the
+		// settings modal names where logs really go rather than the path that
+		// was refused. Logging off is not adopted: it is where this save
+		// landed, not a setting, and writing it back would turn one bad path
+		// into logging off for good.
+		if opened != "" {
+			a.config.LogFile = opened
+		}
+		if warning != "" {
+			logger.Warning("tui.app: %s", warning)
+			// Held rather than shown: a reload paints the hint line back over
+			// anything set here. Whichever path this takes reports it.
+			a.pendingWarning = warning
+		}
+		logger.Debug("tui.app: settings applied log_file=%s log_level=%s", a.config.LogFile, newCfg.LogLevel)
+	}
+
+	if newCfg.Images != old.Images {
+		a.rebuildImageStore(newCfg.LinearAPIKey, a.apiUseBearer)
+		a.updateDetailsView()
+	}
+
+	if newCfg.LinearAPIKey != old.LinearAPIKey || newCfg.APIEndpoint != old.APIEndpoint || newCfg.Timeout != old.Timeout {
+		// Snapshotted before resetCachedState nils what it reads.
+		if a.selectedNavigation != nil {
+			snapshot := a.sessionSnapshot()
+			a.pendingSession = &snapshot
+		}
+		logger.Debug("tui.app: connection changed, reloading the workspace")
+		a.reloadWorkspace()
+		return
+	}
+
+	if newCfg.CacheTTL != old.CacheTTL {
+		a.rebuildLinearDeps()
+	}
+
+	a.restoreModalFocus()
+	// Both report on the hint line, which restoreModalFocus repaints.
+	if newCfg.UpdateCheck && !old.UpdateCheck {
+		a.startUpdateCheck()
+	}
+	a.reportPendingWarning()
+}
+
+// rebuildLinearDeps builds the API client and the team cache from the live config.
+func (a *App) rebuildLinearDeps() {
 	a.linearDeps = newLinearDeps(linearapi.ClientConfig{
-		Token:          newCfg.LinearAPIKey,
-		Endpoint:       newCfg.APIEndpoint,
-		Timeout:        newCfg.Timeout,
+		Token:          a.config.LinearAPIKey,
+		Endpoint:       a.config.APIEndpoint,
+		Timeout:        a.config.Timeout,
 		UseBearer:      a.apiUseBearer,
 		OnUnauthorized: a.apiOnUnauthorized,
-	}, newCfg.CacheTTL)
-	// a.config is already newCfg, so this reads the setting just saved.
-	a.rebuildImageStore(newCfg.LinearAPIKey, a.apiUseBearer)
+	}, a.config.CacheTTL)
+}
 
-	logger.Debug("tui.app: resetting cached state after settings change")
+// reloadWorkspace rebuilds the API client and pulls the workspace again.
+func (a *App) reloadWorkspace() {
+	a.rebuildLinearDeps()
+	a.rebuildImageStore(a.config.LinearAPIKey, a.apiUseBearer)
+
+	logger.Debug("tui.app: resetting cached state before reload")
 	a.resetCachedState()
 	a.loadInitialData()
+	a.restoreModalFocus()
 }
 
 func (a *App) selectedIssueID(section IssuesSection) string {

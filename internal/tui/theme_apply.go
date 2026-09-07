@@ -164,16 +164,21 @@ func (a *App) recolorNavigationTree() {
 	a.applyNavigationNodeColors(root)
 }
 
+// SetTextStyle, not SetColor: tview bakes the background in at construction.
 func (a *App) applyNavigationNodeColors(node *tview.TreeNode) {
 	if node == nil {
 		return
 	}
-	ref := node.GetReference()
-	if ref == nil {
-		node.SetColor(a.theme.Accent)
-	} else if navNode, ok := ref.(*NavigationNode); ok {
-		node.SetColor(a.navRowColor(navNode))
+	style := tcell.StyleDefault.Background(a.theme.Background)
+	switch ref := node.GetReference().(type) {
+	case nil:
+		style = style.Foreground(a.theme.Accent)
+	case *NavigationNode:
+		style = style.Foreground(a.navRowColor(ref))
+	default:
+		style = style.Foreground(node.GetColor())
 	}
+	node.SetTextStyle(style)
 	for _, child := range node.GetChildren() {
 		a.applyNavigationNodeColors(child)
 	}

@@ -235,3 +235,24 @@ func TestSwitchWorkspaceEmptiesTheDetailsPane(t *testing.T) {
 		t.Error("GetSelectedIssue() still returns an issue after the switch")
 	}
 }
+
+// The switch reloads because it is a switch, not because the config differs.
+func TestSwitchWorkspaceReloadsOnASharedKey(t *testing.T) {
+	app := newSwitcherFlowTestApp(t)
+	t.Setenv("TEST_LINEAR_KEY_SIDE", "k-acme")
+
+	before := app.api
+	generation := app.resetGeneration.Load()
+
+	app.switchWorkspace("Side")
+
+	if app.activeWorkspaceName != "Side" {
+		t.Fatalf("activeWorkspaceName = %q, want %q", app.activeWorkspaceName, "Side")
+	}
+	if app.api == before {
+		t.Error("API client not rebuilt: the switch was treated as an unchanged config")
+	}
+	if got := app.resetGeneration.Load(); got == generation {
+		t.Error("cached state not reset: the outgoing workspace's issues are still in the pane")
+	}
+}
