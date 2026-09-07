@@ -434,15 +434,18 @@ func TestALateLoadForAClosedChooserIsDropped(t *testing.T) {
 	}
 
 	pressFieldKey(app, tcell.KeyEnter)
+	// Held before the second chooser exists, so it is the first one's load and
+	// not whichever of the two goroutines queued first.
+	stale := awaitQueuedUpdate(t, pending)
 	sendKey(app, tcell.KeyEscape)
 	pressFieldKey(app, tcell.KeyEnter)
-	runQueuedUpdate(t, pending)
+	stale()
 
 	if app.detailsEdit.gen == 0 {
 		t.Fatal("the second opening took no generation of its own")
 	}
 	if !app.detailsEdit.loading {
-		t.Fatal("the first load filled the second chooser")
+		t.Fatal("the first chooser's load filled the second chooser")
 	}
 }
 
