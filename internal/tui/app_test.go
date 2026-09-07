@@ -104,15 +104,17 @@ func TestRefreshIssues_LazyLoadsPages(t *testing.T) {
 
 	app.refreshIssues()
 
+	// The selection is a later write under its own lock, so waiting on the list
+	// alone can read it back before it lands.
 	waitForCondition(t, time.Second, func() bool {
 		app.issuesMu.RLock()
 		defer app.issuesMu.RUnlock()
-		return len(app.issues) == 1
+		return len(app.issues) == 1 && app.selectedIssue != nil
 	})
 	app.issuesMu.RLock()
 	selectedIssue := app.selectedIssue
 	app.issuesMu.RUnlock()
-	if selectedIssue == nil || selectedIssue.ID != issue1.ID {
+	if selectedIssue.ID != issue1.ID {
 		t.Fatalf("selectedIssue = %#v, want %s", selectedIssue, issue1.ID)
 	}
 

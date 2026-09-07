@@ -476,11 +476,19 @@ func fieldWriteApp(t *testing.T, selected linearapi.Issue) (app *App, written <-
 // runQueuedUpdate runs the next queued UI update here, on the test's goroutine.
 func runQueuedUpdate(t *testing.T, queued <-chan func()) {
 	t.Helper()
+	awaitQueuedUpdate(t, queued)()
+}
+
+// awaitQueuedUpdate takes the next queued update without running it, for a test
+// that has to hold one back while it changes the state the update lands on.
+func awaitQueuedUpdate(t *testing.T, queued <-chan func()) func() {
+	t.Helper()
 	select {
 	case f := <-queued:
-		f()
+		return f
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for a queued UI update")
+		return nil
 	}
 }
 
