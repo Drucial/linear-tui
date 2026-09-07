@@ -55,7 +55,7 @@ func (a *App) handleGlobalKey(event *tcell.EventKey) *tcell.EventKey {
 	// Global shortcuts (only when not in palette)
 	switch event.Key() {
 	case tcell.KeyCtrlC:
-		a.app.Stop()
+		a.quit()
 		return nil
 	case tcell.KeyTab, tcell.KeyBacktab:
 		// Tab walks a pane's own controls and nothing else. Panes move on h/l
@@ -78,7 +78,7 @@ func (a *App) handleGlobalKey(event *tcell.EventKey) *tcell.EventKey {
 		}
 		switch event.Rune() {
 		case a.actionKey("quit", 'q'):
-			a.app.Stop()
+			a.quit()
 			return nil
 		case a.actionKey("open_palette", ':'):
 			a.openPalette()

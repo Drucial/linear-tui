@@ -22,11 +22,10 @@ import (
 	"path/filepath"
 	"time"
 
-	// The decoders the store can measure. A format missing from this list is
-	// refused rather than stored, because a picture whose size cannot be read
-	// cannot have rows reserved for it.
-	_ "image/gif"
-	_ "image/jpeg"
+	// The decoder for the one format kept. Registration is process-wide and
+	// another package importing image/jpeg would quietly widen what decodes
+	// here, so the format is checked by name below rather than by what happens
+	// to be registered.
 	_ "image/png"
 
 	"github.com/praxis-labs-io/zen-linear/internal/config"
@@ -58,6 +57,13 @@ const uploadHost = "uploads.linear.app"
 // leaves that image as the link it already renders.
 var ErrUnsupportedHost = errors.New("images: not a Linear upload")
 
+// keptFormat is the only format stored. PNG is the one encoded format the Kitty
+// graphics protocol accepts (f=100; its others are raw pixels), and a picture
+// the terminal cannot be handed must not be measured: rows would be reserved
+// for it and the link it replaced is already gone, while q=2 means the
+// terminal's refusal never comes back to say so.
+const keptFormat = "png"
+
 // Image is a picture on disk and the size it draws at.
 type Image struct {
 	// Path is the file holding the bytes, ready to be sent to the terminal.
@@ -65,8 +71,6 @@ type Image struct {
 	// Width and Height are the image's own pixels.
 	Width  int
 	Height int
-	// Format is what the decoder recognized: png, jpeg or gif.
-	Format string
 }
 
 // Options is what a store needs. Only Token is required; Client, CacheDir, Now
@@ -174,12 +178,15 @@ func (s *Store) Fetch(ctx context.Context, raw string) (Image, error) {
 	if err != nil {
 		return Image{}, fmt.Errorf("images: read %s: %w", raw, err)
 	}
+	if format != keptFormat {
+		return Image{}, fmt.Errorf("images: %s is %s, and only %s can be drawn", raw, format, keptFormat)
+	}
 
 	if err := writeCache(path, data); err != nil {
 		return Image{}, err
 	}
 
-	return Image{Path: path, Width: header.Width, Height: header.Height, Format: format}, nil
+	return Image{Path: path, Width: header.Width, Height: header.Height}, nil
 }
 
 // allowed reports whether the store will attach the token to this URL.
@@ -245,10 +252,10 @@ func (s *Store) cached(path string) (Image, bool) {
 	defer func() { _ = file.Close() }()
 
 	header, format, err := image.DecodeConfig(file)
-	if err != nil {
+	if err != nil || format != keptFormat {
 		return Image{}, false
 	}
-	return Image{Path: path, Width: header.Width, Height: header.Height, Format: format}, true
+	return Image{Path: path, Width: header.Width, Height: header.Height}, true
 }
 
 // prune drops entries that have aged out. Every failure is ignored: a cache

@@ -37,7 +37,7 @@ func seedImage(t *testing.T, app *App, url string, width, height int) {
 	app.imageCache[url] = &loadedImage{
 		id:    app.imageIDs,
 		state: imageReady,
-		image: zenimages.Image{Path: path, Width: width, Height: height, Format: "png"},
+		image: zenimages.Image{Path: path, Width: width, Height: height},
 	}
 }
 
@@ -219,6 +219,60 @@ func TestWhatCannotBeDrawnKeepsItsLink(t *testing.T) {
 				t.Errorf("the link was dropped rather than kept: %q", body)
 			}
 		})
+	}
+}
+
+// The same upload twice shares its bytes and not its drawing. One placement id
+// across both would leave the first a locked blank hole and delete and re-place
+// the second on every frame.
+func TestTheSamePictureTwiceGetsAPlacementEach(t *testing.T) {
+	app := newUXTestApp(t)
+	withImages(t, app)
+
+	url := "https://uploads.linear.app/one"
+	seedImage(t, app, url, 800, 400)
+
+	app.detailsDescriptionMarkdown = "![shot.png](" + url + ")\n\nBetween them.\n\n![shot.png](" + url + ")"
+	app.renderDetailsBody(80)
+
+	if len(app.detailsBodyImages) != 2 {
+		t.Fatalf("%d pictures reserved, want 2", len(app.detailsBodyImages))
+	}
+	first, second := app.detailsBodyImages[0], app.detailsBodyImages[1]
+	if first.id != second.id {
+		t.Errorf("image ids %d and %d differ, want the bytes shared", first.id, second.id)
+	}
+	if first.placement == second.placement {
+		t.Errorf("both drawings share placement %d, want one each", first.placement)
+	}
+}
+
+// A picture inside a fence is part of the sample. Swapping it for blank rows
+// breaks the thing the fence exists to show verbatim.
+func TestAPictureInsideAFenceIsLeftAlone(t *testing.T) {
+	app := newUXTestApp(t)
+	withImages(t, app)
+
+	url := "https://uploads.linear.app/one"
+	seedImage(t, app, url, 800, 400)
+
+	app.detailsDescriptionMarkdown = strings.Join([]string{
+		"How to embed one:",
+		"",
+		"```markdown",
+		"![shot.png](" + url + ")",
+		"```",
+		"",
+		"![shot.png](" + url + ")",
+	}, "\n")
+	app.renderDetailsBody(80)
+
+	if len(app.detailsBodyImages) != 1 {
+		t.Fatalf("%d pictures reserved, want 1: the fenced one is a sample", len(app.detailsBodyImages))
+	}
+	body := strings.Join(app.detailsBodyLines, "\n")
+	if !strings.Contains(body, "![shot.png](") {
+		t.Errorf("the fenced markdown was rewritten: %q", body)
 	}
 }
 

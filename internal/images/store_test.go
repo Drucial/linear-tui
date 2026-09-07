@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -91,9 +92,6 @@ func TestFetchStoresTheImageAndItsSize(t *testing.T) {
 	}
 	if img.Width != 320 || img.Height != 180 {
 		t.Errorf("size = %dx%d, want 320x180", img.Width, img.Height)
-	}
-	if img.Format != "png" {
-		t.Errorf("format = %q, want png", img.Format)
 	}
 	if _, err := os.Stat(img.Path); err != nil {
 		t.Errorf("cached file: %v", err)
@@ -205,6 +203,17 @@ func TestFetchRefusesWhatItCannotMeasure(t *testing.T) {
 			name: "something that is not an image",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte("<html>not a picture</html>"))
+			},
+		},
+		{
+			// PNG is the only encoded format the terminal takes, so a JPEG is
+			// refused here and keeps the link glamour draws for it. Storing one
+			// would reserve rows for a picture the terminal cannot decode.
+			name: "a JPEG",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "image/jpeg")
+				img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+				_ = jpeg.Encode(w, img, nil)
 			},
 		},
 		{

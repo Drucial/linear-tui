@@ -92,12 +92,12 @@ The details pane is **one scrolling page**. The issue's
 metadata, its description rendered as markdown, then the activity and comments
 in one stream, and a box to write in at the end.
 
-A picture in the description is drawn where it sits and scrolls with the page,
-in a terminal that can draw one. Its name goes underneath. Anywhere else — a
-terminal without the Kitty graphics protocol, `images` set to `off`, a picture
-that will not load, or one written inside a sentence — the name and the link
-appear instead, which is what every terminal used to show. See
-[configuration](configuration.md#appearance).
+A PNG in the description is drawn where it sits and scrolls with the page, in a
+terminal that can draw one. Its name goes underneath. Anywhere else — a terminal
+without the Kitty graphics protocol, `images` set to `off`, another image
+format, a picture that will not load, or one written inside a sentence or a code
+fence — the name and the link appear instead, which is what every terminal used
+to show. See [configuration](configuration.md#appearance).
 
 `{` and `}` step through the comment cards; `j` and `k` keep scrolling. Nothing
 is picked out until a brace says so, and Esc lets go again. A picked card takes

@@ -246,6 +246,17 @@ func (a *App) openPalette() {
 	a.updateFocus()
 }
 
+// paletteOpen reports whether the palette overlay is up. Its page is always
+// added, so presence says nothing and the visible pages are what answer.
+func (a *App) paletteOpen() bool {
+	for _, name := range a.pages.GetPageNames(true) {
+		if name == "palette" {
+			return true
+		}
+	}
+	return false
+}
+
 // closePalette closes the command palette overlay.
 func (a *App) closePalette() {
 	a.pages.HidePage("palette")

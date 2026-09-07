@@ -28,14 +28,25 @@ const (
 	defaultCellHeight = 16
 )
 
+// placementKey names one drawing of one image. Both halves are needed: the
+// same upload twice in a description shares its bytes and not its placement.
+type placementKey struct {
+	image     uint32
+	placement uint32
+}
+
+func keyOf(image screenImage) placementKey {
+	return placementKey{image: image.id, placement: image.placement}
+}
+
 // graphicsState is what the terminal is currently showing, so a frame that
 // changed nothing writes nothing.
 type graphicsState struct {
 	protocol graphicsProtocol
 	// sent is the images the terminal already holds bytes for, by id.
 	sent map[uint32]bool
-	// placed is where each id is currently drawn.
-	placed map[uint32]screenImage
+	// placed is where each placement is currently drawn.
+	placed map[placementKey]screenImage
 	// cellWidth and cellHeight are one cell in pixels, which is what turns an
 	// image's own aspect ratio into a count of rows.
 	cellWidth  int
@@ -50,7 +61,7 @@ func newGraphicsState() *graphicsState {
 	return &graphicsState{
 		protocol:   kittyGraphics{},
 		sent:       map[uint32]bool{},
-		placed:     map[uint32]screenImage{},
+		placed:     map[placementKey]screenImage{},
 		cellWidth:  defaultCellWidth,
 		cellHeight: defaultCellHeight,
 	}
@@ -74,11 +85,27 @@ func (a *App) beginImageFrame() {
 // so an overlay drawn after the details pane does not cover it — it came out
 // over the settings modal. Nothing is placed while one is up, and the delete
 // pass takes down whatever already was.
+//
+// The palette is asked for separately because it is not a modal in the
+// dispatch sense: its page is added once and shown and hidden, where every
+// entry in modalBindings is added by the modal that owns it. activeModal reads
+// the page's presence, so it cannot see this one.
 func (a *App) imagesWanted() []screenImage {
-	if a.activeModal() != nil {
+	if a.activeModal() != nil || a.paletteOpen() {
 		return nil
 	}
 	return a.pendingImages
+}
+
+// quit takes the pictures down and stops the application.
+//
+// The teardown cannot wait until Run returns: Stop finalizes the screen, which
+// closes the tty, so a delete written after it goes nowhere. Ghostty drops a
+// placement when the alternate screen is left and hid this, but that is the
+// terminal being tidy rather than the app being correct.
+func (a *App) quit() {
+	a.clearImages()
+	a.app.Stop()
 }
 
 // recordImages takes the pictures a draw wants. The draw itself must not write
@@ -110,21 +137,21 @@ func (a *App) drawImages(screen tcell.Screen) {
 
 	pending := a.imagesWanted()
 
-	wanted := map[uint32]screenImage{}
+	wanted := map[placementKey]screenImage{}
 	for _, image := range pending {
-		wanted[image.id] = image
+		wanted[keyOf(image)] = image
 	}
 
 	// Gone or moved: the placement is dropped before anything new is drawn, so
 	// two copies of one picture are never on screen at once.
-	for id, was := range state.placed {
-		if now, still := wanted[id]; still && now == was {
+	for key, was := range state.placed {
+		if now, still := wanted[key]; still && now == was {
 			continue
 		}
-		if err := state.protocol.Delete(tty, id); err != nil {
-			logger.Debug("tui.graphics: delete image id=%d error=%v", id, err)
+		if err := state.protocol.Delete(tty, key.image, key.placement); err != nil {
+			logger.Debug("tui.graphics: delete image id=%d placement=%d error=%v", key.image, key.placement, err)
 		}
-		delete(state.placed, id)
+		delete(state.placed, key)
 		// The cells under it go back to tcell, or the text that replaces the
 		// picture is never painted.
 		screen.LockRegion(was.x, was.y, was.cols, was.rows, false)
@@ -136,7 +163,7 @@ func (a *App) drawImages(screen tcell.Screen) {
 	}
 
 	for _, image := range pending {
-		if _, already := state.placed[image.id]; already {
+		if _, already := state.placed[keyOf(image)]; already {
 			// Unmoved, so the terminal is still drawing it. The lock is set
 			// again because a resize reallocates the cell buffer and drops it.
 			screen.LockRegion(image.x, image.y, image.cols, image.rows, true)
@@ -156,11 +183,11 @@ func (a *App) drawImages(screen tcell.Screen) {
 		}
 
 		info.TPuts(tty, info.TGoto(image.x, image.y))
-		if err := state.protocol.Place(tty, image.id, image.cols, image.rows); err != nil {
+		if err := state.protocol.Place(tty, image.id, image.placement, image.cols, image.rows); err != nil {
 			logger.Debug("tui.graphics: place image id=%d error=%v", image.id, err)
 			continue
 		}
-		state.placed[image.id] = image
+		state.placed[keyOf(image)] = image
 		screen.LockRegion(image.x, image.y, image.cols, image.rows, true)
 	}
 }
@@ -181,13 +208,13 @@ func (a *App) clearImages() {
 	if !ok {
 		return
 	}
-	for id, was := range state.placed {
-		if err := state.protocol.Delete(tty, id); err != nil {
-			logger.Debug("tui.graphics: delete image id=%d error=%v", id, err)
+	for key, was := range state.placed {
+		if err := state.protocol.Delete(tty, key.image, key.placement); err != nil {
+			logger.Debug("tui.graphics: delete image id=%d placement=%d error=%v", key.image, key.placement, err)
 		}
 		screen.LockRegion(was.x, was.y, was.cols, was.rows, false)
 	}
-	state.placed = map[uint32]screenImage{}
+	state.placed = map[placementKey]screenImage{}
 	a.pendingImages = nil
 }
 
@@ -198,15 +225,20 @@ func (a *App) clearImages() {
 // Past the row cap the box is narrowed rather than the rows clipped: the
 // terminal scales the picture into exactly the box it is given, so keeping the
 // full width and fewer rows would squash it.
-func (s *graphicsState) imageBox(maxCols, width, height int) (cols, rows int) {
-	if maxCols <= 0 || width <= 0 || height <= 0 || s.cellWidth <= 0 || s.cellHeight <= 0 {
+//
+// maxRows is clamped against the pane by the caller as well as the constant,
+// the way the details chooser clamps its own row cap: visibleImages drops a
+// picture that does not fit whole, so rows reserved past the pane's height are
+// blank forever.
+func (s *graphicsState) imageBox(maxCols, maxRows, width, height int) (cols, rows int) {
+	if maxCols <= 0 || maxRows <= 0 || width <= 0 || height <= 0 || s.cellWidth <= 0 || s.cellHeight <= 0 {
 		return 0, 0
 	}
 
 	cols = maxCols
 	rows = ceilDiv(cols*s.cellWidth*height, width*s.cellHeight)
-	if rows > maxImageRows {
-		rows = maxImageRows
+	if rows > maxRows {
+		rows = maxRows
 		cols = ceilDiv(rows*s.cellHeight*width, height*s.cellWidth)
 		if cols > maxCols {
 			cols = maxCols

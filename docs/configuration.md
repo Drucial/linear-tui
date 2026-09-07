@@ -52,14 +52,15 @@ the background and foreground the terminal reports at launch, so it matches
 whatever you already run. `rose_pine_moon` keeps the terminal's background
 transparent. The other three pin their colors.
 
-`images` draws the pictures in an issue's description in place instead of
-listing their names and links. It needs a terminal that speaks the Kitty
+`images` draws the PNGs in an issue's description in place instead of listing
+their names and links. It needs a terminal that speaks the Kitty
 graphics protocol — Ghostty, Kitty, WezTerm and recent Konsole among them — and
 zen-linear asks the terminal at launch rather than guessing from `TERM`. On
 `auto` a terminal that says no gets the names and links, which is the same thing
 `off` gives everywhere, so there is nothing to see if you are unsure which you
 have. Set `off` to keep the links on a slow connection or while sharing a
-screen.
+screen. A picture in any other format keeps its name and link, since PNG is the
+only encoded format the protocol carries.
 
 `compact` density takes the padding out of the details pane, the modals and
 the status bar, and closes the gap between the details page's sections.

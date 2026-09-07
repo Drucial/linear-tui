@@ -31,23 +31,28 @@ type pageSlot struct {
 // slot uses. It is not a widget: nothing about it is drawn here, because a
 // graphic goes to the terminal as an escape sequence rather than to cells.
 type pageImage struct {
-	id     uint32
-	path   string
-	row    int
-	rows   int
-	column int
-	cols   int
+	// id names the bytes the terminal holds and placement names this drawing
+	// of them. One description can carry the same upload twice, and a shared
+	// placement id would leave one of them a locked blank hole.
+	id        uint32
+	placement uint32
+	path      string
+	row       int
+	rows      int
+	column    int
+	cols      int
 }
 
 // screenImage is a pageImage after the scroll offset, in screen cells. This is
 // what the after-draw handler places, and what it compares one frame against
 // the next to decide whether anything has to move.
 type screenImage struct {
-	id   uint32
-	path string
-	x, y int
-	cols int
-	rows int
+	id        uint32
+	placement uint32
+	path      string
+	x, y      int
+	cols      int
+	rows      int
 }
 
 // detailsPage draws the issue and the widgets that sit inside it.
@@ -156,12 +161,13 @@ func (p *detailsPage) visibleImages(x, y, height, top int) []screenImage {
 			continue
 		}
 		visible = append(visible, screenImage{
-			id:   image.id,
-			path: image.path,
-			x:    x + image.column,
-			y:    y + start,
-			cols: image.cols,
-			rows: image.rows,
+			id:        image.id,
+			placement: image.placement,
+			path:      image.path,
+			x:         x + image.column,
+			y:         y + start,
+			cols:      image.cols,
+			rows:      image.rows,
 		})
 	}
 	return visible

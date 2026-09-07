@@ -27,16 +27,16 @@ func TestKittyWritesTheSequencesItMeansTo(t *testing.T) {
 		{
 			name: "place",
 			call: func(buf *bytes.Buffer) error {
-				return kittyGraphics{}.Place(buf, 7, 60, 12)
+				return kittyGraphics{}.Place(buf, 7, 2, 60, 12)
 			},
-			want: "\x1b_Ga=p,i=7,p=7,c=60,r=12,C=1,q=2\x1b\\",
+			want: "\x1b_Ga=p,i=7,p=2,c=60,r=12,C=1,q=2\x1b\\",
 		},
 		{
 			name: "delete the placement",
 			call: func(buf *bytes.Buffer) error {
-				return kittyGraphics{}.Delete(buf, 7)
+				return kittyGraphics{}.Delete(buf, 7, 2)
 			},
-			want: "\x1b_Ga=d,d=i,i=7,p=7,q=2\x1b\\",
+			want: "\x1b_Ga=d,d=i,i=7,p=2,q=2\x1b\\",
 		},
 	}
 
@@ -118,6 +118,7 @@ func TestImageBoxKeepsTheShapeAndTheCap(t *testing.T) {
 	tests := []struct {
 		name          string
 		maxCols       int
+		maxRows       int
 		width, height int
 		wantCols      int
 		wantRows      int
@@ -126,35 +127,45 @@ func TestImageBoxKeepsTheShapeAndTheCap(t *testing.T) {
 			name: "a wide screenshot fills the measure",
 			// 800x400 at 10x20 cells is 80 columns and 20 half-height rows,
 			// so a 60-column measure asks for 30 pixels-worth: 15 rows.
-			maxCols: 60, width: 800, height: 400, wantCols: 60, wantRows: 15,
+			maxCols: 60, maxRows: maxImageRows, width: 800, height: 400, wantCols: 60, wantRows: 15,
 		},
 		{
 			name:    "a tall picture is narrowed rather than squashed",
-			maxCols: 60, width: 400, height: 800, wantCols: 15, wantRows: 15,
+			maxCols: 60, maxRows: maxImageRows, width: 400, height: 800, wantCols: 15, wantRows: 15,
 		},
 		{
 			name:    "a wide banner keeps at least one row",
-			maxCols: 60, width: 2000, height: 20, wantCols: 60, wantRows: 1,
+			maxCols: 60, maxRows: maxImageRows, width: 2000, height: 20, wantCols: 60, wantRows: 1,
+		},
+		{
+			// A short pane cannot show a picture that does not fit whole, so
+			// the budget narrows it rather than reserving rows that stay blank.
+			name:    "a short pane narrows the picture",
+			maxCols: 60, maxRows: 6, width: 800, height: 400, wantCols: 24, wantRows: 6,
+		},
+		{
+			name:    "no room, no box",
+			maxCols: 60, maxRows: 0, width: 800, height: 400, wantCols: 0, wantRows: 0,
 		},
 		{
 			name:    "no measure, no box",
-			maxCols: 0, width: 800, height: 400, wantCols: 0, wantRows: 0,
+			maxCols: 0, maxRows: maxImageRows, width: 800, height: 400, wantCols: 0, wantRows: 0,
 		},
 		{
 			name:    "an unmeasurable picture has no box",
-			maxCols: 60, width: 0, height: 0, wantCols: 0, wantRows: 0,
+			maxCols: 60, maxRows: maxImageRows, width: 0, height: 0, wantCols: 0, wantRows: 0,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cols, rows := state.imageBox(test.maxCols, test.width, test.height)
+			cols, rows := state.imageBox(test.maxCols, test.maxRows, test.width, test.height)
 			if cols != test.wantCols || rows != test.wantRows {
-				t.Errorf("imageBox(%d, %d, %d) = %dx%d, want %dx%d",
-					test.maxCols, test.width, test.height, cols, rows, test.wantCols, test.wantRows)
+				t.Errorf("imageBox(%d, %d, %d, %d) = %dx%d, want %dx%d",
+					test.maxCols, test.maxRows, test.width, test.height, cols, rows, test.wantCols, test.wantRows)
 			}
-			if rows > maxImageRows {
-				t.Errorf("rows = %d, past the cap of %d", rows, maxImageRows)
+			if rows > test.maxRows {
+				t.Errorf("rows = %d, past the cap of %d", rows, test.maxRows)
 			}
 		})
 	}

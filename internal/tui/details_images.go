@@ -57,9 +57,10 @@ type loadedImage struct {
 
 // descriptionImage is one picture in the description being rendered.
 type descriptionImage struct {
-	url     string
-	caption string
-	loaded  *loadedImage
+	url       string
+	caption   string
+	loaded    *loadedImage
+	placement uint32
 }
 
 // imagesEnabled reports whether pictures are drawn at all. The store is built
@@ -99,10 +100,26 @@ func (a *App) describedImages(markdown string) (string, []descriptionImage) {
 	}
 
 	var found []descriptionImage
-	rendered := descriptionImagePattern.ReplaceAllStringFunc(markdown, func(match string) string {
-		parts := descriptionImagePattern.FindStringSubmatch(match)
+	// One placement per drawing, counted per upload: a description carrying the
+	// same picture twice shares the bytes and not the placement.
+	drawings := map[string]uint32{}
+
+	lines := strings.Split(markdown, "\n")
+	fenced := false
+	for i, line := range lines {
+		// A picture inside a fence is part of the sample, and swapping it for
+		// blank rows breaks the thing the fence exists to show verbatim.
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+
+		parts := descriptionImagePattern.FindStringSubmatch(line)
 		if parts == nil {
-			return match
+			continue
 		}
 		alt, url := parts[1], parts[2]
 
@@ -110,14 +127,20 @@ func (a *App) describedImages(markdown string) (string, []descriptionImage) {
 		if loaded == nil || loaded.state == imageFailed {
 			// Left as markdown, so glamour draws the name and the link exactly
 			// as it does for a terminal that cannot show pictures at all.
-			return match
+			continue
 		}
 
-		found = append(found, descriptionImage{url: url, caption: imageCaption(alt, url), loaded: loaded})
-		return imageSentinel(len(found) - 1)
-	})
+		drawings[url]++
+		found = append(found, descriptionImage{
+			url:       url,
+			caption:   imageCaption(alt, url),
+			loaded:    loaded,
+			placement: drawings[url],
+		})
+		lines[i] = imageSentinel(len(found) - 1)
+	}
 
-	return rendered, found
+	return strings.Join(lines, "\n"), found
 }
 
 // imageCaption is what is written under the picture: the alt text the author
@@ -215,15 +238,16 @@ func (a *App) reserveImageRows(lines []string, found []descriptionImage, width i
 
 		image := found[index]
 		if image.loaded.state == imageReady {
-			cols, rows := a.graphics.imageBox(width, image.loaded.image.Width, image.loaded.image.Height)
+			cols, rows := a.graphics.imageBox(width, a.imageRowBudget(), image.loaded.image.Width, image.loaded.image.Height)
 			if cols > 0 && rows > 0 {
 				placements = append(placements, pageImage{
-					id:     image.loaded.id,
-					path:   image.loaded.image.Path,
-					row:    len(out),
-					rows:   rows,
-					column: 0,
-					cols:   cols,
+					id:        image.loaded.id,
+					placement: image.placement,
+					path:      image.loaded.image.Path,
+					row:       len(out),
+					rows:      rows,
+					column:    0,
+					cols:      cols,
 				})
 				for range rows {
 					out = append(out, "")
@@ -237,6 +261,22 @@ func (a *App) reserveImageRows(lines []string, found []descriptionImage, width i
 	}
 
 	return out, placements
+}
+
+// imageRowBudget is the tallest a picture may be drawn here: the cap, and never
+// more than the pane can show at once. visibleImages drops one that does not fit
+// whole, so rows reserved past the pane's height would stay blank forever.
+//
+// Before the first draw the pane has no measured height, and the cap stands
+// alone; the refit that follows re-lays the page against the real one.
+func (a *App) imageRowBudget() int {
+	budget := maxImageRows
+	// The caption sits under the picture and the pane wants a row of its own
+	// above the fold, so the height is not spent to the last cell.
+	if fitted := a.detailsFittedHeight - 2; fitted > 0 && fitted < budget {
+		budget = fitted
+	}
+	return budget
 }
 
 // imageCaptionLine is the line under a picture, in the shade a comment's byline
