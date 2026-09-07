@@ -459,13 +459,15 @@ func (a *App) refitDetailsPage(width, height int) {
 		return
 	}
 	row, column := a.detailsPageView.GetScrollOffset()
-	// Only the width reaches glamour. A shorter pane re-lays the page, which is
-	// what re-caps an open chooser against it.
-	if width != a.detailsFittedWidth {
+	// Only the width reaches glamour, and the height only through the room it
+	// leaves a picture: a pane that grew past the floor has to re-run the body
+	// to get its pictures back, and one that shrank under it to give them up.
+	budget := a.imageRowBudget()
+	a.detailsFittedHeight = height
+	if width != a.detailsFittedWidth || a.imageRowBudget() != budget {
 		a.detailsFittedWidth = width
 		a.renderDetailsBody(width)
 	}
-	a.detailsFittedHeight = height
 	a.renderDetailsPage()
 	a.detailsPageView.ScrollTo(row, column)
 }

@@ -95,7 +95,7 @@ func (a *App) rebuildImageStore(token string, useBearer bool) {
 // left for glamour, with a sentinel where each taken picture was. A picture the
 // app has not seen before starts loading here.
 func (a *App) describedImages(markdown string) (string, []descriptionImage) {
-	if !a.imagesEnabled() {
+	if !a.imagesEnabled() || a.imageRowBudget() <= 0 {
 		return markdown, nil
 	}
 
@@ -267,14 +267,24 @@ func (a *App) reserveImageRows(lines []string, found []descriptionImage, width i
 // more than the pane can show at once. visibleImages drops one that does not fit
 // whole, so rows reserved past the pane's height would stay blank forever.
 //
+// Zero means do not draw at all. A pane with less than minImageRows to spare
+// cannot show a picture worth looking at, and reserving rows for one that never
+// places leaves a hole where the link used to be, which is worse than the link.
+//
 // Before the first draw the pane has no measured height, and the cap stands
 // alone; the refit that follows re-lays the page against the real one.
 func (a *App) imageRowBudget() int {
-	budget := maxImageRows
+	if a.detailsFittedHeight <= 0 {
+		return maxImageRows
+	}
 	// The caption sits under the picture and the pane wants a row of its own
 	// above the fold, so the height is not spent to the last cell.
-	if fitted := a.detailsFittedHeight - 2; fitted > 0 && fitted < budget {
-		budget = fitted
+	budget := a.detailsFittedHeight - 2
+	if budget < minImageRows {
+		return 0
+	}
+	if budget > maxImageRows {
+		budget = maxImageRows
 	}
 	return budget
 }

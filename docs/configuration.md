@@ -60,7 +60,8 @@ zen-linear asks the terminal at launch rather than guessing from `TERM`. On
 `off` gives everywhere, so there is nothing to see if you are unsure which you
 have. Set `off` to keep the links on a slow connection or while sharing a
 screen. A picture in any other format keeps its name and link, since PNG is the
-only encoded format the protocol carries.
+only encoded format the protocol carries, and so does one in a details pane too
+short to show it whole.
 
 `compact` density takes the padding out of the details pane, the modals and
 the status bar, and closes the gap between the details page's sections.

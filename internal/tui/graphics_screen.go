@@ -262,6 +262,13 @@ func ceilDiv(numerator, denominator int) int {
 	return (numerator + denominator - 1) / denominator
 }
 
-// maxImageRows caps a picture's height so one screenshot cannot bury the
-// description it illustrates.
-const maxImageRows = 15
+const (
+	// maxImageRows caps a picture's height so one screenshot cannot bury the
+	// description it illustrates.
+	maxImageRows = 15
+
+	// minImageRows is the least a picture is worth drawing in. Under it the
+	// description keeps the link instead: a few rows show nothing anyone can
+	// read, and a picture the pane cannot fit whole is never placed at all.
+	minImageRows = 6
+)

@@ -276,6 +276,37 @@ func TestAPictureInsideAFenceIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A pane too short to show a picture whole keeps the link instead. Reserving
+// rows for one that never places leaves a hole where the link used to be, which
+// is worse than the link.
+func TestAPaneTooShortToDrawKeepsTheLink(t *testing.T) {
+	app := newUXTestApp(t)
+	withImages(t, app)
+
+	url := "https://uploads.linear.app/one"
+	seedImage(t, app, url, 800, 400)
+	app.detailsDescriptionMarkdown = "![shot.png](" + url + ")"
+
+	app.detailsFittedHeight = minImageRows + 1
+	app.renderDetailsBody(80)
+
+	if len(app.detailsBodyImages) != 0 {
+		t.Fatalf("%d pictures reserved in a %d row pane, want none", len(app.detailsBodyImages), app.detailsFittedHeight)
+	}
+	body := strings.Join(app.detailsBodyLines, "\n")
+	if !strings.Contains(body, "uploads.linear.app") {
+		t.Errorf("the link was dropped rather than kept: %q", body)
+	}
+
+	// And the picture comes back when the pane grows, or a resize would have to
+	// be followed by a width change to undo it.
+	app.detailsFittedHeight = 40
+	app.renderDetailsBody(80)
+	if len(app.detailsBodyImages) != 1 {
+		t.Errorf("%d pictures reserved once the pane grew, want 1", len(app.detailsBodyImages))
+	}
+}
+
 func TestImageCaptionNamesThePicture(t *testing.T) {
 	tests := []struct {
 		name string
