@@ -287,8 +287,10 @@ func TestAPaneTooShortToDrawKeepsTheLink(t *testing.T) {
 	seedImage(t, app, url, 800, 400)
 	app.detailsDescriptionMarkdown = "![shot.png](" + url + ")"
 
-	app.detailsFittedHeight = minImageRows + 1
-	app.renderDetailsBody(80)
+	// Through refitDetailsPage, not renderDetailsBody: the height reaching the
+	// body at all is the thing under test, and calling the body directly would
+	// pass whether or not the refit noticed.
+	app.refitDetailsPage(80, minImageRows+1)
 
 	if len(app.detailsBodyImages) != 0 {
 		t.Fatalf("%d pictures reserved in a %d row pane, want none", len(app.detailsBodyImages), app.detailsFittedHeight)
@@ -298,12 +300,14 @@ func TestAPaneTooShortToDrawKeepsTheLink(t *testing.T) {
 		t.Errorf("the link was dropped rather than kept: %q", body)
 	}
 
-	// And the picture comes back when the pane grows, or a resize would have to
-	// be followed by a width change to undo it.
-	app.detailsFittedHeight = 40
-	app.renderDetailsBody(80)
+	// A height-only resize, so nothing but the budget crossing the floor can
+	// bring the picture back.
+	app.refitDetailsPage(80, 40)
 	if len(app.detailsBodyImages) != 1 {
 		t.Errorf("%d pictures reserved once the pane grew, want 1", len(app.detailsBodyImages))
+	}
+	if body := strings.Join(app.detailsBodyLines, "\n"); strings.Contains(body, "uploads.linear.app") {
+		t.Errorf("the link is still there beside the picture: %q", body)
 	}
 }
 

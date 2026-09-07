@@ -459,9 +459,14 @@ func (a *App) refitDetailsPage(width, height int) {
 	row, column := a.detailsPageView.GetScrollOffset()
 	// Only the width reaches glamour, and the height only through the room it
 	// leaves a picture: crossing the floor either way has to re-run the body.
-	budget := a.imageRowBudget()
+	// Asked only where pictures are drawn, or a height-only resize would re-wrap
+	// the whole description for a reader who has none.
+	budget := 0
+	if a.imagesEnabled() {
+		budget = a.imageRowBudget()
+	}
 	a.detailsFittedHeight = height
-	if width != a.detailsFittedWidth || a.imageRowBudget() != budget {
+	if width != a.detailsFittedWidth || (a.imagesEnabled() && a.imageRowBudget() != budget) {
 		a.detailsFittedWidth = width
 		a.renderDetailsBody(width)
 	}
