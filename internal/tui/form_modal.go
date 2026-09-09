@@ -15,6 +15,11 @@ const (
 	// formFieldRows is what one single-line field costs: its caps label plus
 	// the framed input.
 	formFieldRows = 4
+	// packedColumnGap is the space between two fields sharing a row.
+	packedColumnGap = 2
+	// packedLabelBudget caps what a packed column is asked to hold before the
+	// row folds. Without it one long label would stack every row.
+	packedLabelBudget = 16
 )
 
 // FormButton is one action in a FormModal's button row.
@@ -33,6 +38,17 @@ type formRow struct {
 	hidden     bool
 	focusables []tview.Primitive
 	labelView  *tview.TextView
+	packed     []packedColumn
+	perLine    int
+}
+
+// packedColumn is one field of a packed row, held as data rather than as a
+// place in a Flex so the row can be rebuilt at however many columns the
+// current width affords.
+type packedColumn struct {
+	labelView *tview.TextView
+	frame     *tview.Flex
+	labelLen  int
 }
 
 // FormModal renders a Linear-style form modal: caps labels above framed
@@ -88,8 +104,6 @@ func (p *formPage) Draw(screen tcell.Screen) {
 
 // pickerRowState tracks the open shared row consecutive fields pack into.
 type pickerRowState struct {
-	labels *tview.Flex
-	values *tview.Flex
 	rowIdx int
 }
 
@@ -321,34 +335,98 @@ func (fm *FormModal) packField(label string, field tview.Primitive) int {
 		SetBorderColor(theme.Border)
 
 	if fm.pickerRow == nil {
+		container := tview.NewFlex().SetDirection(tview.FlexRow)
+		container.SetBackgroundColor(theme.ModalBackground())
+
+		fm.appendRow(formRow{
+			container: container,
+			height:    formFieldRows,
+			minHeight: formFieldRows,
+		})
+		fm.pickerRow = &pickerRowState{rowIdx: len(fm.rows) - 1}
+	}
+
+	rowIdx := fm.pickerRow.rowIdx
+	row := &fm.rows[rowIdx]
+	row.packed = append(row.packed, packedColumn{
+		labelView: labelView,
+		frame:     frame,
+		labelLen:  len([]rune(strings.ToUpper(label))),
+	})
+	row.focusables = append(row.focusables, field)
+	row.columns++
+	fm.frameOf[field] = frame
+	return rowIdx
+}
+
+// packedLines returns how many stacked lines a packed row needs at the given
+// inner width, and how many columns go on each. A row folds when its widest
+// label no longer fits its share: four columns become two, then one.
+func packedLines(row *formRow, innerWidth int) (perLine int) {
+	count := len(row.packed)
+	if count <= 1 || innerWidth <= 0 {
+		return 1
+	}
+	widest := 0
+	for _, column := range row.packed {
+		if column.labelLen > widest {
+			widest = column.labelLen
+		}
+	}
+	// A label longer than any share would fold every row to one column, so the
+	// requirement is capped: past it the label truncates instead.
+	if widest > packedLabelBudget {
+		widest = packedLabelBudget
+	}
+	for _, candidate := range []int{count, 2, 1} {
+		if candidate > count {
+			continue
+		}
+		share := (innerWidth - packedColumnGap*(candidate-1)) / candidate
+		if share >= widest {
+			return candidate
+		}
+	}
+	return 1
+}
+
+// relayoutPacked rebuilds a packed row at the columns the width affords and
+// sets its height. Called from the fit closure, so a resize reflows the row.
+func (fm *FormModal) relayoutPacked(row *formRow, innerWidth int) {
+	if len(row.packed) == 0 {
+		return
+	}
+	perLine := packedLines(row, innerWidth)
+	if row.perLine == perLine && row.container.GetItemCount() > 0 {
+		return
+	}
+	row.perLine = perLine
+
+	theme := fm.app.theme
+	row.container.Clear()
+	for start := 0; start < len(row.packed); start += perLine {
+		end := start + perLine
+		if end > len(row.packed) {
+			end = len(row.packed)
+		}
 		labels := tview.NewFlex()
 		labels.SetBackgroundColor(theme.ModalBackground())
 		values := tview.NewFlex()
 		values.SetBackgroundColor(theme.ModalBackground())
-
-		container := tview.NewFlex().SetDirection(tview.FlexRow)
-		container.SetBackgroundColor(theme.ModalBackground())
-		container.AddItem(labels, 1, 0, false)
-		container.AddItem(values, 3, 0, true)
-
-		fm.appendRow(formRow{
-			container: container,
-			height:    4,
-			minHeight: 4,
-		})
-		fm.pickerRow = &pickerRowState{labels: labels, values: values, rowIdx: len(fm.rows) - 1}
-	} else {
-		fm.pickerRow.labels.AddItem(nil, 2, 0, false)
-		fm.pickerRow.values.AddItem(nil, 2, 0, false)
+		for i, column := range row.packed[start:end] {
+			if i > 0 {
+				labels.AddItem(nil, packedColumnGap, 0, false)
+				values.AddItem(nil, packedColumnGap, 0, false)
+			}
+			labels.AddItem(column.labelView, 0, 1, false)
+			values.AddItem(column.frame, 0, 1, true)
+		}
+		row.container.AddItem(labels, 1, 0, false)
+		row.container.AddItem(values, 3, 0, start == 0)
 	}
-
-	fm.pickerRow.labels.AddItem(labelView, 0, 1, false)
-	fm.pickerRow.values.AddItem(frame, 0, 1, true)
-	rowIdx := fm.pickerRow.rowIdx
-	fm.rows[rowIdx].focusables = append(fm.rows[rowIdx].focusables, field)
-	fm.rows[rowIdx].columns++
-	fm.frameOf[field] = frame
-	return rowIdx
+	lines := (len(row.packed) + perLine - 1) / perLine
+	row.height = formFieldRows * lines
+	row.minHeight = row.height
 }
 
 // capsLabel builds the dim caps label a field is titled by. Wrapping is off
@@ -635,9 +713,32 @@ func (fm *FormModal) chromeHeight() int {
 	return chrome
 }
 
-// rowHeights returns per-row heights after shrinking flexible rows to fit
-// the screen clamp. When even the floor overflows, the window scrolls.
+// panelWidth is the modal's width for the current screen: its clamp, given
+// back to a screen too narrow to hold it.
+func (fm *FormModal) panelWidth() int {
+	screenW, _ := fm.screenSize()
+	width := screenW - formModalScreenWMargin
+	if limit := fm.effectiveMaxWidth(); width > limit || width <= 0 {
+		width = limit
+	}
+	return width
+}
+
+// innerWidth is what a row has to lay itself out in: the panel less its border
+// and the gutter each side.
+func (fm *FormModal) innerWidth() int {
+	padding := fm.app.density.ModalPadding
+	return fm.panelWidth() - 2 - padding.Left - padding.Right
+}
+
+// rowHeights returns per-row heights after folding packed rows to the current
+// width and shrinking flexible rows to fit the screen clamp. When even the
+// floor overflows, the window scrolls.
 func (fm *FormModal) rowHeights(screenH int) []int {
+	inner := fm.innerWidth()
+	for i := range fm.rows {
+		fm.relayoutPacked(&fm.rows[i], inner)
+	}
 	heights := make([]int, len(fm.rows))
 	total := fm.chromeHeight()
 	for i, row := range fm.rows {
@@ -763,15 +864,10 @@ func (fm *FormModal) layout() {
 	fm.frame.AddItem(fm.hintView, 1, 0, false)
 
 	centerModal(fm.root, fm.frame, func() (int, int) {
-		screenW, screenH := fm.screenSize()
-
-		width := screenW - formModalScreenWMargin
-		if limit := fm.effectiveMaxWidth(); width > limit || width <= 0 {
-			width = limit
-		}
+		_, screenH := fm.screenSize()
 		height := fm.contentHeight(screenH)
 		fm.applyRowWindow(fm.rowHeights(screenH), height-fm.chromeHeight())
-		return width, height
+		return fm.panelWidth(), height
 	})
 }
 
@@ -820,7 +916,9 @@ func (fm *FormModal) Root() *tview.Flex { return fm.root }
 // there is no window to scroll them in. Called once, after the fields.
 func (fm *FormModal) ContentBody() *tview.Flex {
 	fm.rowsBox.Clear()
-	for _, row := range fm.rows {
+	for i := range fm.rows {
+		row := &fm.rows[i]
+		fm.relayoutPacked(row, fm.innerWidth())
 		if row.hidden {
 			continue
 		}

@@ -492,25 +492,64 @@ func TestPackedLabelsTruncateRatherThanWrap(t *testing.T) {
 	fm.AddPicker("Agent model", []string{"one"}, 0, nil)
 	fm.Show("form_test")
 
-	var labelLine string
-	for _, line := range drawPrimitiveAt(t, fm.Root(), 50, 30) {
-		if strings.Contains(line, "AGENT") {
-			labelLine = line
-			break
-		}
-	}
-	if labelLine == "" {
-		t.Fatal("no label row drew")
-	}
-
+	lines := drawPrimitiveAt(t, fm.Root(), 50, 30)
 	drawn := map[string]bool{}
-	for _, label := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(labelLine), -1) {
-		if strings.HasPrefix(label, "AGENT") {
-			drawn[label] = true
+	for _, line := range lines {
+		for _, label := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(line), -1) {
+			if strings.HasPrefix(label, "AGENT") {
+				drawn[label] = true
+			}
 		}
 	}
 	if len(drawn) != 3 {
-		t.Fatalf("three labels drew %d distinct texts, so at least two read the same: %q", len(drawn), labelLine)
+		t.Fatalf("three labels drew %d distinct texts, so at least two read the same:\n%s",
+			len(drawn), strings.Join(lines, "\n"))
+	}
+}
+
+// TestPackedRowFoldsWhenColumnsGetNarrow covers the reflow: a row of four
+// fields is one line while each column holds its label, and stacks rather than
+// truncating everything once they do not.
+func TestPackedRowFoldsWhenColumnsGetNarrow(t *testing.T) {
+	app := newUXTestApp(t)
+	fm := NewFormModal(app, "Test")
+	for _, label := range []string{"Timeout", "Page size", "Cache TTL", "Debounce"} {
+		fm.AddPackedInput(label, "")
+	}
+
+	for _, tc := range []struct {
+		screenW int
+		want    int
+	}{
+		{120, formFieldRows},
+		{50, formFieldRows * 2},
+		{20, formFieldRows * 4},
+	} {
+		app.pages.SetRect(0, 0, tc.screenW, 40)
+		if got := fm.rowHeights(40)[0]; got != tc.want {
+			t.Fatalf("at %d columns the packed row is %d lines, want %d", tc.screenW, got, tc.want)
+		}
+	}
+}
+
+// TestAFoldedRowKeepsEveryFieldOnScreen guards the point of folding: the
+// fields that moved to a second line are drawn, not dropped.
+func TestAFoldedRowKeepsEveryFieldOnScreen(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 50, 40)
+
+	fm := NewFormModal(app, "Test")
+	labels := []string{"Timeout", "Page size", "Cache TTL", "Debounce"}
+	for _, label := range labels {
+		fm.AddPackedInput(label, "")
+	}
+	fm.Show("form_test")
+
+	screen := strings.Join(drawPrimitiveAt(t, fm.Root(), 50, 40), "\n")
+	for _, label := range labels {
+		if !strings.Contains(screen, strings.ToUpper(label)) {
+			t.Fatalf("%q is missing after the fold:\n%s", label, screen)
+		}
 	}
 }
 
