@@ -110,10 +110,10 @@ which makes `default_workspace`, `default_team` and `default_project` first-run
 settings. Turn it off to open on those every time.
 
 `update_check` asks GitHub once a day whether a newer release has been
-published, and says so on the status bar when there is one. Nothing is
-downloaded and nothing is installed: upgrading is still re-running the
-installer. The answer is kept in `~/.zen-linear/update-check.json` so the
-request happens once a day rather than once a launch.
+published, and says so on the status bar when there is one. The check itself
+downloads nothing and installs nothing; `zen-linear update` is what upgrades.
+The answer is kept in `~/.zen-linear/update-check.json` so the request happens
+once a day rather than once a launch.
 
 The request carries the running version and nothing else. No token, no
 workspace, no identifier of any kind goes with it, and a build you compiled

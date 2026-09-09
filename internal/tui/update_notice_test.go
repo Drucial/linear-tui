@@ -47,8 +47,8 @@ func TestAnAvailableReleaseIsOfferedOnTheHintLine(t *testing.T) {
 		t.Errorf("status bar = %q, want the available version named", got)
 	}
 	// The number alone leaves the reader to work out how to act on it.
-	if !strings.Contains(got, "installer") {
-		t.Errorf("status bar = %q, want the upgrade path named", got)
+	if !strings.Contains(got, "zen-linear update") {
+		t.Errorf("status bar = %q, want the upgrade command named", got)
 	}
 	// A release being available is not a failure and must not be dressed as one.
 	if strings.Contains(got, "Error:") {

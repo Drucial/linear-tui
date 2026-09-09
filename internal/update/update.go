@@ -1,7 +1,8 @@
-// Package update reports whether a newer release has been published. It only
-// ever answers that question: nothing here downloads or replaces a binary,
-// because re-running the installer already upgrades correctly and a self-update
-// would fight go install, make install, and whatever else owns the file.
+// Package update reports whether a newer release has been published, and runs
+// the published installer when the user asks for one. It never replaces a
+// binary itself: install.sh and install.ps1 already own the platform matrix,
+// the checksum gate and the overwrite of a running executable, and a second
+// copy of all that in Go would be a second thing to keep right.
 package update
 
 import (

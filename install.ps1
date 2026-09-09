@@ -22,8 +22,11 @@ $installDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else {
 	Join-Path $env:LOCALAPPDATA 'Programs\zen-linear'
 }
 
+# Not Write-Error: $ErrorActionPreference above makes that terminating, so the
+# exit below never runs and Windows PowerShell 5.1 does not reliably answer
+# non-zero on its own. `zen-linear update` reads this status.
 function Die($message) {
-	Write-Error $message
+	[Console]::Error.WriteLine($message)
 	exit 1
 }
 
