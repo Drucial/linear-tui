@@ -272,38 +272,49 @@ func NewSettingsModal(app *App) *SettingsModal {
 	sm.fm = NewFormModal(app, "Settings")
 	sm.fm.SetMaxWidth(settingsModalWidth)
 
-	sm.endpointField = sm.fm.AddInput("API endpoint", "")
-	sm.timeoutField = sm.fm.AddInput("Timeout", "")
-	sm.pageSizeField = sm.fm.AddInput("Page size", "")
-	sm.cacheTTLField = sm.fm.AddInput("Cache TTL", "")
-	sm.searchDebounceField = sm.fm.AddInput("Search debounce", "")
-	sm.logFileField = sm.fm.AddInput("Log file", "")
-
-	sm.logLevelField = sm.fm.AddPicker("Log level", sm.logLevelOptions, 0, nil)
+	// Four short pages rather than one scroll, most-used first. The section
+	// name is the context, so a field inside Agents is Provider, not Agent
+	// provider: two labels on a row that read the same are the bug this
+	// answers, and the fold is what keeps them apart when it cannot.
+	sm.fm.BeginSection("Appearance")
 	sm.themeField = sm.fm.AddPicker("Theme", sm.themeOptions, 0, nil)
 	sm.densityField = sm.fm.AddPicker("Density", sm.densityOptions, 0, nil)
-	// Consecutive pickers share one row, so each group needs its own break or
-	// all eight pack into a single row and clip their labels and values.
+	// Consecutive pickers share one row, so each pair needs its own break.
 	sm.fm.EndRow()
-
 	sm.roundedBordersField = sm.fm.AddPicker("Rounded borders", sm.booleanOptions, booleanOptionIndex(false), nil)
 	sm.imagesField = sm.fm.AddPicker("Images", sm.imagesOptions, 0, nil)
 	sm.fm.EndRow()
 
-	sm.sessionRestoreField = sm.fm.AddPicker("Restore last session", sm.booleanOptions, booleanOptionIndex(true), nil)
-	sm.updateCheckField = sm.fm.AddPicker("Check for updates", sm.booleanOptions, booleanOptionIndex(true), nil)
+	sm.fm.BeginSection("Startup")
+	sm.sessionRestoreField = sm.fm.AddPicker("Restore session", sm.booleanOptions, booleanOptionIndex(true), nil)
+	sm.updateCheckField = sm.fm.AddPicker("Update check", sm.booleanOptions, booleanOptionIndex(true), nil)
 	sm.fm.EndRow()
+	sm.defaultTeamField = sm.fm.AddInput("Default team", "")
+	sm.fm.SetPlaceholder(sm.defaultTeamField, "blank opens All Issues")
+	sm.defaultProjectField = sm.fm.AddInput("Default project", "")
+	sm.fm.SetPlaceholder(sm.defaultProjectField, "requires a default team")
 
-	sm.agentProviderField = sm.fm.AddPicker("Agent provider", sm.agentProviderOptions, 0, func(text string, index int) {
+	sm.fm.BeginSection("Agents")
+	sm.agentProviderField = sm.fm.AddPicker("Provider", sm.agentProviderOptions, 0, func(text string, index int) {
 		_ = index
 		sm.setAgentModelOptionsForProvider(text)
 	})
-	sm.agentSandboxField = sm.fm.AddPicker("Agent sandbox", sm.agentSandboxOptions, 0, nil)
-	sm.agentModelField = sm.fm.AddPicker("Agent model", sm.agentModelOptions, 0, nil)
+	sm.agentSandboxField = sm.fm.AddPicker("Sandbox", sm.agentSandboxOptions, 0, nil)
+	sm.agentModelField = sm.fm.AddPicker("Model", sm.agentModelOptions, 0, nil)
+	sm.fm.EndRow()
+	sm.agentWorkspaceField = sm.fm.AddInput("Workspace", "")
+	sm.fm.SetPlaceholder(sm.agentWorkspaceField, "blank runs in the current directory")
 
-	sm.agentWorkspaceField = sm.fm.AddInput("Agent workspace (blank uses CWD)", "")
-	sm.defaultTeamField = sm.fm.AddInput("Default team (blank opens All Issues)", "")
-	sm.defaultProjectField = sm.fm.AddInput("Default project (requires default team)", "")
+	sm.fm.BeginSection("Network & logging")
+	sm.endpointField = sm.fm.AddInput("API endpoint", "")
+	sm.timeoutField = sm.fm.AddPackedInput("Timeout", "")
+	sm.pageSizeField = sm.fm.AddPackedInput("Page size", "")
+	sm.cacheTTLField = sm.fm.AddPackedInput("Cache TTL", "")
+	sm.searchDebounceField = sm.fm.AddPackedInput("Debounce", "")
+	sm.fm.EndRow()
+	sm.logFileField = sm.fm.AddPackedInput("Log file", "")
+	sm.logLevelField = sm.fm.AddPicker("Log level", sm.logLevelOptions, 0, nil)
+	sm.fm.EndRow()
 
 	sm.fm.AddButtons(
 		FormButton{Label: "Save", OnPress: sm.saveSettings},
@@ -311,7 +322,7 @@ func NewSettingsModal(app *App) *SettingsModal {
 	)
 	sm.fm.SetOnSubmit(sm.saveSettings)
 	sm.fm.SetOnCancel(sm.Hide)
-	sm.fm.SetHint("Esc cancel · Tab next · ⏎ open dropdown · ⌃⏎ save")
+	sm.fm.SetHint("Esc cancel · ↑↓ section · Tab next · ⏎ open dropdown · ⌃⏎ save")
 
 	return sm
 }

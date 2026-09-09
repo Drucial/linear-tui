@@ -123,24 +123,37 @@ func TestSettingsFormRoundTripsFlags(t *testing.T) {
 // settings pickers. Consecutive AddPicker calls pack into one row, so dropping
 // an EndRow silently squeezes every picker into a single row and clips the
 // labels and values rather than failing.
-func TestSettingsPickersSpanMultipleRows(t *testing.T) {
+func TestSettingsSectionsHoldEveryFieldAndFitWithoutScrolling(t *testing.T) {
 	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 80, 24)
 	sm := app.settingsModal
+	fm := sm.fm
 
-	widest := 0
-	for _, row := range sm.fm.rows {
-		if row.columns > widest {
-			widest = row.columns
+	if len(fm.sections) == 0 {
+		t.Fatal("the settings form is not sectioned")
+	}
+	for i, row := range fm.rows {
+		if row.section < 0 {
+			t.Fatalf("row %d belongs to no section, so no rail entry reaches it", i)
 		}
 	}
-	if widest > 3 {
-		t.Fatalf("widest picker row = %d columns, want at most 3: the settings pickers lost a row break and will clip", widest)
+
+	// Every section has to fit the smallest terminal worth supporting, or the
+	// scroll this sectioning exists to remove is still there.
+	for i := range fm.sections {
+		fm.activeSection = i
+		heights := fm.rowHeights(24)
+		total := fm.chromeHeight()
+		for _, h := range heights {
+			total += h
+		}
+		if maxHeight := 24 - formModalScreenHMargin; total > maxHeight {
+			t.Fatalf("section %q is %d lines at 80x24, past the %d it has",
+				fm.sections[i].name, total, maxHeight)
+		}
 	}
 }
 
-// The log path is the one setting whose default is machine-specific. Showing it
-// resolved is right — the field should name where logs really go — but saving
-// it back verbatim is what pinned a shared config.json to one machine's home.
 func TestSettingsFormDropsTheMachineDefaultLogPath(t *testing.T) {
 	isolateLogging(t)
 
