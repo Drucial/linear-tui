@@ -69,8 +69,10 @@ func (a *App) startUpdateCheck() {
 	}()
 }
 
-// updateNoticeText names the upgrade rather than only the version, since the
-// number alone leaves the reader to go and find out how.
+// updateNoticeText names the command rather than only the version, since the
+// number alone leaves the reader to go and find out how. It stays a nudge: the
+// upgrade replaces this binary while it is running, so it belongs to the CLI
+// rather than to a key in here.
 func updateNoticeText(latest string) string {
-	return fmt.Sprintf("%s is available. Re-run the installer to upgrade.", latest)
+	return fmt.Sprintf("%s is available. Run zen-linear update.", latest)
 }

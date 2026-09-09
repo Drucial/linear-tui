@@ -21,16 +21,26 @@ func main() {
 
 // run executes the CLI entrypoint and returns a process exit code.
 func run(args []string) int {
-	if len(args) > 0 && (args[0] == "--version" || args[0] == "-v") {
+	if len(args) == 0 {
+		return runTUI()
+	}
+
+	switch args[0] {
+	case "--version", "-v":
 		fmt.Println(VersionInfo())
 		return 0
-	}
-
-	if len(args) > 0 && args[0] == "auth" {
+	case "help", "--help", "-h":
+		printUsage(os.Stdout)
+		return 0
+	case "auth":
 		return runAuth(args[1:])
+	case "update":
+		return runUpdate(os.Stdout, os.Stderr)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command %q\n\n", args[0])
+		printUsage(os.Stderr)
+		return 1
 	}
-
-	return runTUI()
 }
 
 // runAuth handles `zen-linear auth ...` subcommands.

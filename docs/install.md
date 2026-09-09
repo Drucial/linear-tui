@@ -133,13 +133,23 @@ Where things are kept:
 ## Upgrading
 
 The app checks once a day whether a newer release has been published, and says
-so on the status bar when there is one. It never downloads or installs
-anything. Turn it off with `"update_check": false`, or from the settings modal;
+so on the status bar when there is one. The check itself downloads nothing.
+Turn it off with `"update_check": false`, or from the settings modal;
 [configuration.md](configuration.md) covers what the request does and does not
 carry.
 
-Re-run the installer. It takes the latest release and replaces the binary,
-including over a copy that is currently running.
+To take the release:
+
+```sh
+zen-linear update
+```
+
+It runs the same installer as a fresh install, into the directory the running
+binary is already in, so the copy on your PATH is the one that is replaced.
+Quit the app first: the upgrade overwrites the binary it is running from.
+
+Re-running the installer by hand still works, and is what to reach for if the
+binary is somewhere you need a different `INSTALL_DIR` for.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/praxis-labs-io/zen-linear/main/install.sh | sh
@@ -158,4 +168,8 @@ zen-linear 0.3.0 (commit: 1a2b3c4, built: 2026-08-28T14:00:00Z, darwin/arm64)
 ```
 
 A binary reporting `dev` was built locally rather than downloaded. That is what
-`make install` and `go build` produce, and it is correct for a working tree.
+`make install` and `go build` produce, and it is correct for a working tree. It
+is never update-checked, though `zen-linear update` still installs the latest
+release over it if you ask.
+
+`zen-linear help` lists every command.
