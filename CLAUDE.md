@@ -223,11 +223,13 @@ line. What they painted over was the button row, the hint and the bottom
 border. `TestScrolledOffRowsDoNotPaintOverTheChrome` draws it rather than
 counting heights: the count was right the whole time.
 
-**Every label, hint and context row has wrapping off**, since each is mounted
-exactly one line tall. `AGENT PROVIDER` in a fourteen-cell column word-wrapped
-to `AGENT` and drew only that, so three fields on the agent row read the same.
-`capsLabel` is the one constructor for a field's title and is where that rule
-lives.
+**Every label has wrapping off**, since each is mounted exactly one line tall.
+`AGENT PROVIDER` in a fourteen-cell column word-wrapped to `AGENT` and drew only
+that, so three fields on the agent row read the same. `capsLabel` is the one
+constructor for a field's title and is where that rule lives. **The hint is the
+exception and keeps wrapping**, because it is centered and tview centers the
+untruncated line: turning wrap off there clips both ends and loses Esc and the
+save key rather than the tail.
 
 **`layout` goes through `centerModal`, and anything a resize changes lives in
 the `fit` closure**: the row window, the packed fold and the rail's
@@ -241,12 +243,30 @@ sums. A row folds once its widest label no longer fits its share, capped by
 `packedLabelBudget` so one long label cannot stack every row.
 
 **`BeginSection` makes a page.** Rows added after it are laid out only while
-that page is open, on the gate a hidden row already used, and a form that never
-calls it is one page. The rail is registered before any field so Tab off the
-last one wraps back to it, and it owns the arrows while it holds the keyboard,
-which is the same rule that keeps arrows on a focused widget everywhere else.
-It takes a column where the panel can spare one and names the open section on a
-line where it cannot.
+that page is open, and a row added before the first one belongs to no section
+and is shown on every page, since dropping it would lose the field outright. A
+form that never calls `BeginSection` is one page, which is every other modal.
+
+**The section list is a pane, not a tab stop with arrows on it.** It owns the
+movement keys while it holds the keyboard, and `⏎`, `l` or `→` cross into the
+fields; `Esc` comes back before it closes anything, the way it leaves edit mode
+before it leaves the pane. Backtab off the first field is the long way round and
+Tab never stops on a field the open section does not mount (`focusReachable`).
+Pane numbers and `h`/`l` from the fields cannot work here the way they do in the
+app: every field takes free text, so digits and letters have to type, and the
+arrows move the caret.
+
+**The rule is the divider and the cursor line is the focus.** There is no box
+around the list — `modalColumnRule` runs the height of the content between the
+two panes — so the lit row is the only thing saying which pane a key reaches,
+and it is drawn only while the list has the keyboard. A list that looked
+selected either way said nothing. Where the panel cannot spare the column the
+rail names the open section on a single line instead.
+
+**The panel is sized to the tallest section** (`tallestSectionRows`), so
+stepping never resizes the modal under the reader and a short section carries
+the slack. `rowHeights` zeroes every row the open section does not show, so the
+tallest is measured off the rows themselves rather than off those heights.
 
 **The rail is written from the frame's draw func, never from a focus
 callback.** `TextView.MouseHandler` holds that view's own lock while it moves
