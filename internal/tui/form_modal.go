@@ -311,10 +311,7 @@ func (fm *FormModal) AddPackedInput(label, initial string) *tview.InputField {
 func (fm *FormModal) packField(label string, field tview.Primitive) int {
 	theme := fm.app.theme
 
-	labelView := tview.NewTextView()
-	labelView.SetText(strings.ToUpper(label))
-	labelView.SetTextColor(theme.SecondaryText)
-	labelView.SetBackgroundColor(theme.ModalBackground())
+	labelView := fm.capsLabel(label)
 
 	frame := tview.NewFlex().SetDirection(tview.FlexRow)
 	frame.Box = tview.NewBox() // restore the background fill (see NewFormModal)
@@ -354,6 +351,19 @@ func (fm *FormModal) packField(label string, field tview.Primitive) int {
 	return rowIdx
 }
 
+// capsLabel builds the dim caps label a field is titled by. Wrapping is off
+// because the view is mounted one line tall: a label wider than its column
+// would word-wrap and draw only its first word, which is how two fields on a
+// packed row came to read the same.
+func (fm *FormModal) capsLabel(label string) *tview.TextView {
+	view := tview.NewTextView()
+	view.SetWrap(false)
+	view.SetText(strings.ToUpper(label))
+	view.SetTextColor(fm.app.theme.SecondaryText)
+	view.SetBackgroundColor(fm.app.theme.ModalBackground())
+	return view
+}
+
 // AddCheckbox appends an inline toggle: one row with the box beside its caps
 // label. A framed unit would give a one-cell control a field-sized shell.
 func (fm *FormModal) AddCheckbox(label string, checked bool) *tview.Checkbox {
@@ -371,10 +381,7 @@ func (fm *FormModal) AddCheckbox(label string, checked bool) *tview.Checkbox {
 	box.SetBackgroundColor(theme.ModalBackground())
 
 	caps := strings.ToUpper(label)
-	labelView := tview.NewTextView()
-	labelView.SetText(caps)
-	labelView.SetTextColor(theme.SecondaryText)
-	labelView.SetBackgroundColor(theme.ModalBackground())
+	labelView := fm.capsLabel(label)
 
 	line := tview.NewFlex()
 	line.SetBackgroundColor(theme.ModalBackground())
@@ -427,10 +434,7 @@ func staticRowContainer(view *tview.TextView, theme Theme) *tview.Flex {
 func (fm *FormModal) fieldUnit(label string, editor tview.Primitive) (container *tview.Flex, labelView *tview.TextView) {
 	theme := fm.app.theme
 
-	labelView = tview.NewTextView()
-	labelView.SetText(strings.ToUpper(label))
-	labelView.SetTextColor(theme.SecondaryText)
-	labelView.SetBackgroundColor(theme.ModalBackground())
+	labelView = fm.capsLabel(label)
 
 	frame := tview.NewFlex().SetDirection(tview.FlexRow)
 	frame.Box = tview.NewBox() // restore the background fill (see NewFormModal)
@@ -533,10 +537,10 @@ func (fm *FormModal) SetPlaceholder(input *tview.InputField, text string) {
 		Foreground(fm.app.theme.SecondaryText))
 }
 
-// appendRow adds a row to the rows container at its full height.
+// appendRow records a row. Mounting is applyRowWindow's job: a row the window
+// leaves out must not be in the container at all.
 func (fm *FormModal) appendRow(row formRow) {
 	fm.rows = append(fm.rows, row)
-	fm.rowsBox.AddItem(row.container, row.height, 0, len(row.focusables) > 0)
 }
 
 // registerFocusable wires a widget into the tab order and focus styling.
@@ -705,55 +709,46 @@ func (fm *FormModal) ensureVisible(rowIdx int) {
 	fm.applyRowWindow(heights, avail)
 }
 
-// applyRowWindow resizes rows so only the scroll window occupies space, and
-// returns what each row got. The row that runs off the bottom is clipped
-// rather than dropped: a field taller than the window would otherwise vanish
-// while it holds focus.
+// applyRowWindow mounts the scroll window and returns what each row got. Rows
+// outside it are left out of the container rather than resized to nothing: a
+// Flex hands every fixed-size child its full size whatever the parent's height
+// is, so a row still mounted at zero paints over the buttons and the border.
+// The row that runs off the bottom is clipped rather than dropped, since a
+// field taller than the window would otherwise vanish while it holds focus.
 func (fm *FormModal) applyRowWindow(heights []int, avail int) []int {
 	shown := make([]int, len(fm.rows))
 	used := 0
 	clipped := false
+	fm.rowsBox.Clear()
 	for i, row := range fm.rows {
+		if i < fm.scrollTop {
+			continue
+		}
 		h := 0
-		if i >= fm.scrollTop {
-			if remaining := avail - used; remaining > 0 {
-				h = heights[i]
-				if h > remaining {
-					h = remaining
-				}
-				used += h
+		if remaining := avail - used; remaining > 0 {
+			h = heights[i]
+			if h > remaining {
+				h = remaining
 			}
-			if h < heights[i] {
-				clipped = true
-			}
+			used += h
+		}
+		if h < heights[i] {
+			clipped = true
 		}
 		shown[i] = h
-		fm.rowsBox.ResizeItem(row.container, h, 0)
+		if h > 0 {
+			fm.rowsBox.AddItem(row.container, h, 0, len(row.focusables) > 0)
+		}
 	}
 	fm.scrollAbove = fm.scrollTop > 0
 	fm.scrollBelow = clipped
 	return shown
 }
 
-// layout sizes the modal for the current screen and rebuilds the centering
-// wrappers. Pointers stay stable so pages keep referencing the same root.
+// layout fills the frame and centers it. The frame's contents do not depend on
+// the screen, but the row window does, so it is computed inside the fit closure
+// centerModal asks again on every resize.
 func (fm *FormModal) layout() {
-	screenW, screenH := fm.screenSize()
-
-	width := screenW - formModalScreenWMargin
-	if limit := fm.effectiveMaxWidth(); width > limit || width <= 0 {
-		width = limit
-	}
-	height := fm.contentHeight(screenH)
-
-	heights := fm.rowHeights(screenH)
-	rowsTotal := 0
-	for _, h := range heights {
-		rowsTotal += h
-	}
-	avail := height - fm.chromeHeight()
-	fm.applyRowWindow(heights, avail)
-
 	fm.frame.Clear()
 	if fm.contextText != "" {
 		fm.frame.AddItem(fm.contextView, 1, 0, false)
@@ -767,15 +762,17 @@ func (fm *FormModal) layout() {
 	fm.frame.AddItem(nil, 1, 0, false)
 	fm.frame.AddItem(fm.hintView, 1, 0, false)
 
-	column := tview.NewFlex().SetDirection(tview.FlexRow)
-	column.AddItem(nil, 0, 1, false)
-	column.AddItem(fm.frame, height, 0, true)
-	column.AddItem(nil, 0, 1, false)
+	centerModal(fm.root, fm.frame, func() (int, int) {
+		screenW, screenH := fm.screenSize()
 
-	fm.root.Clear()
-	fm.root.AddItem(nil, 0, 1, false)
-	fm.root.AddItem(column, width, 0, true)
-	fm.root.AddItem(nil, 0, 1, false)
+		width := screenW - formModalScreenWMargin
+		if limit := fm.effectiveMaxWidth(); width > limit || width <= 0 {
+			width = limit
+		}
+		height := fm.contentHeight(screenH)
+		fm.applyRowWindow(fm.rowHeights(screenH), height-fm.chromeHeight())
+		return width, height
+	})
 }
 
 // Show lays the modal out for the current screen, resets focus to the first
@@ -816,10 +813,20 @@ func (fm *FormModal) Hide(pageName string) {
 // Root returns the fullscreen wrapper for pages.
 func (fm *FormModal) Root() *tview.Flex { return fm.root }
 
-// ContentBody returns the field rows without the modal shell or buttons,
-// for modals that compose the form beside other panes (prompt templates).
-// The embedding modal owns the border, sizing, button row, and hint line.
+// ContentBody returns the field rows without the modal shell or buttons, for
+// modals that compose the form beside other panes (prompt templates). The
+// embedding modal owns the border, sizing, button row and hint line, and never
+// calls Show, so this is where its rows are mounted: at full height, since
+// there is no window to scroll them in. Called once, after the fields.
 func (fm *FormModal) ContentBody() *tview.Flex {
+	fm.rowsBox.Clear()
+	for _, row := range fm.rows {
+		if row.hidden {
+			continue
+		}
+		fm.rowsBox.AddItem(row.container, row.height, 0, len(row.focusables) > 0)
+	}
+
 	body := tview.NewFlex().SetDirection(tview.FlexRow)
 	body.SetBackgroundColor(fm.app.theme.ModalBackground())
 	body.AddItem(fm.rowsBox, 0, 1, true)

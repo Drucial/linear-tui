@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/praxis-labs-io/zen-linear/internal/config"
 	"github.com/rivo/tview"
 )
 
@@ -418,5 +421,111 @@ func TestFormModalMenuClosesWhenFocusLeavesIt(t *testing.T) {
 	capture(tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone))
 	if fm.openPicker != nil {
 		t.Fatal("keys are still routed into the menu")
+	}
+}
+
+// TestScrolledOffRowsDoNotPaintOverTheChrome guards the whole overlap class: a
+// Flex hands every fixed-size child its full size whatever the parent's height
+// is, so rows left mounted at zero used to paint over the buttons, the hint and
+// the panel's bottom border, and consecutive input labels stacked on one line.
+func TestScrolledOffRowsDoNotPaintOverTheChrome(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 80, 24)
+
+	fm := NewFormModal(app, "Test")
+	labels := []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"}
+	for _, label := range labels {
+		fm.AddInput(label, "")
+	}
+	fm.AddPicker("India", []string{"one"}, 0, nil)
+	fm.AddPicker("Juliett", []string{"one"}, 0, nil)
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	lines := drawPrimitiveAt(t, fm.Root(), 80, 24)
+	screen := strings.Join(lines, "\n")
+
+	if !strings.Contains(screen, "Save") || !strings.Contains(screen, "Cancel") {
+		t.Fatalf("the button row is not on screen:\n%s", screen)
+	}
+	if !strings.Contains(screen, "Esc cancel") {
+		t.Fatalf("the hint line is not on screen:\n%s", screen)
+	}
+
+	// Whatever the window holds, it holds a prefix of the rows: a label from
+	// further down than the last one drawn means that row painted outside it.
+	last := -1
+	for i, label := range labels {
+		if strings.Contains(screen, strings.ToUpper(label)) {
+			last = i
+		}
+	}
+	if last < 0 {
+		t.Fatalf("no field label drew at all:\n%s", screen)
+	}
+	for i, label := range labels {
+		if i <= last {
+			continue
+		}
+		if strings.Contains(screen, strings.ToUpper(label)) {
+			t.Fatalf("%q is off the window but painted anyway:\n%s", label, screen)
+		}
+	}
+	for _, label := range []string{"INDIA", "JULIETT"} {
+		if strings.Contains(screen, label) {
+			t.Fatalf("packed row %q is off the window but painted anyway:\n%s", label, screen)
+		}
+	}
+}
+
+// TestPackedLabelsTruncateRatherThanWrap guards the duplicate-label bug: a
+// label view is one line tall, so a wrapping label drew only its first word and
+// two fields on a row read the same.
+func TestPackedLabelsTruncateRatherThanWrap(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 50, 30)
+
+	fm := NewFormModal(app, "Test")
+	fm.AddPicker("Agent provider", []string{"one"}, 0, nil)
+	fm.AddPicker("Agent sandbox", []string{"one"}, 0, nil)
+	fm.AddPicker("Agent model", []string{"one"}, 0, nil)
+	fm.Show("form_test")
+
+	var labelLine string
+	for _, line := range drawPrimitiveAt(t, fm.Root(), 50, 30) {
+		if strings.Contains(line, "AGENT") {
+			labelLine = line
+			break
+		}
+	}
+	if labelLine == "" {
+		t.Fatal("no label row drew")
+	}
+
+	drawn := map[string]bool{}
+	for _, label := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(labelLine), -1) {
+		if strings.HasPrefix(label, "AGENT") {
+			drawn[label] = true
+		}
+	}
+	if len(drawn) != 3 {
+		t.Fatalf("three labels drew %d distinct texts, so at least two read the same: %q", len(drawn), labelLine)
+	}
+}
+
+// TestAnEmbeddedFormDrawsItsFields covers the one modal that composes a form
+// beside another pane rather than showing it: it never calls Show, so
+// ContentBody is where its rows are mounted.
+func TestAnEmbeddedFormDrawsItsFields(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+	app.promptTemplatesModal.Show(nil, func([]config.AgentPromptTemplate) error { return nil })
+
+	screen := strings.Join(drawPrimitiveAt(t, app.promptTemplatesModal.modal, 100, 40), "\n")
+	for _, label := range []string{"NAME", "PROMPT"} {
+		if !strings.Contains(screen, label) {
+			t.Fatalf("the embedded form did not draw %q:\n%s", label, screen)
+		}
 	}
 }
