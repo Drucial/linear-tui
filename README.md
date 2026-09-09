@@ -19,10 +19,11 @@ Your Linear sidebar is the navigation tree, favorites in the order you keep
 them there, and `J`/`K` reorder them back into Linear. The issue list groups
 and subgroups across six dimensions, sorts on a chain, filters on seven fields,
 and draws twelve configurable columns. The details pane is one scrolling page:
-the issue, its description, and its activity and comments merged by time, with
-threaded replies you can edit and delete on your own. Eleven fields edit in the
-row they sit in, and each one saves on its own. Sixty-four palette commands are
-scoped to the pane you opened the palette from.
+the issue, its description with any pictures drawn in place, and its activity
+and comments merged by time, with threaded replies you can edit and delete on
+your own. Eleven fields edit in the row they sit in, and each one saves on its
+own. Sixty-four palette commands are scoped to the pane you opened the palette
+from.
 
 Field options load for the team that owns the issue, so a cross-team favorite
 offers you writes Linear will accept. More than one Linear workspace is a
@@ -41,7 +42,7 @@ pane's number is in its title, and typing that number focuses it.
 
 ## What it does not do today
 
-This is v0.2.0, an early release ahead of a launch.
+This is v0.4.0, an early release ahead of a launch.
 
 The issue list is a snapshot until you press `r`. Issues are the only editable
 object, so projects, cycles and milestones are navigation scopes and issue
@@ -78,8 +79,9 @@ cd zen-linear
 make install
 ```
 
-The installer and `make install` both put the binary in `~/.local/bin`, and
-`INSTALL_DIR` moves it. Homebrew is not supported.
+`install.sh` and `make install` both put the binary in `~/.local/bin`;
+`install.ps1` puts it in `%LOCALAPPDATA%\Programs\zen-linear`. `INSTALL_DIR`
+moves either. Homebrew is not supported.
 [docs/install.md](docs/install.md) has the requirements, the PATH setup and how
 to upgrade.
 
