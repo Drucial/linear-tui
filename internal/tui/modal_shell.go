@@ -74,6 +74,23 @@ func (a *App) fitModalHeight(want, least int) int {
 // modalRule is a footer's top border. It runs out past the gutter to the
 // panel's own border on each side, so the rule meets it in a tee rather than
 // stopping short of it.
+// modalColumnRule is the line between two panes inside one panel, run the full
+// height of the content beside it. Vertical sibling of modalRule.
+func (a *App) modalColumnRule() *tview.Box {
+	rule := tview.NewBox()
+	rule.SetBackgroundColor(a.theme.ModalBackground())
+	rule.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		style := tcell.StyleDefault.
+			Background(a.theme.ModalBackground()).
+			Foreground(a.theme.Border)
+		for row := y; row < y+height; row++ {
+			screen.SetContent(x, row, tview.Borders.Vertical, nil, style)
+		}
+		return x, y, width, height
+	})
+	return rule
+}
+
 func (a *App) modalRule() *tview.Box {
 	rule := tview.NewBox()
 	rule.SetBackgroundColor(a.theme.ModalBackground())

@@ -20,8 +20,9 @@ const (
 	// packedLabelBudget caps what a packed column is asked to hold before the
 	// row folds. Without it one long label would stack every row.
 	packedLabelBudget = 16
-	// sectionRailGap is the space between the section rail and the fields.
-	sectionRailGap = 3
+	// sectionRailGap is what the rail costs beyond its widest name: a gutter
+	// each side of the rule that divides it from the fields.
+	sectionRailGap = 4
 	// formRowsMinWidth is what the fields need before the rail is worth a
 	// column of its own. Under it the rail names the open section on one line
 	// instead, since a rail is a quarter of a narrow terminal.
@@ -52,8 +53,7 @@ type formRow struct {
 // formSection is one page of the form. An exhaustive form reads as a few short
 // pages rather than one scroll, and only the open section is laid out.
 type formSection struct {
-	name  string
-	first int
+	name string
 }
 
 // packedColumn is one field of a packed row, held as data rather than as a
@@ -97,6 +97,7 @@ type FormModal struct {
 	sections       []formSection
 	activeSection  int
 	sectionRail    *tview.TextView
+	railRule       *tview.Box
 	railFocused    bool
 	body           *tview.Flex
 	focusIdx       int
@@ -147,10 +148,9 @@ func NewFormModal(app *App, title string) *FormModal {
 	fm.body.SetBackgroundColor(app.theme.ModalBackground())
 
 	fm.hintView = tview.NewTextView()
-	// Both of these are mounted one line tall, so a wrap loses the tail
-	// outright where a truncation at least keeps its head. Same reason as
-	// capsLabel.
-	fm.hintView.SetWrap(false)
+	// The hint keeps wrapping, unlike every other one-line view here: it is
+	// centered, and tview centers the untruncated line, so turning wrap off
+	// clips both ends and loses Esc and the save key rather than the tail.
 	fm.hintView.SetTextColor(app.theme.SecondaryText)
 	fm.hintView.SetBackgroundColor(app.theme.ModalBackground())
 	fm.hintView.SetTextAlign(tview.AlignCenter)
@@ -305,26 +305,52 @@ func (fm *FormModal) SetRowHidden(rowIdx int, hidden bool) {
 func (fm *FormModal) BeginSection(name string) {
 	fm.pickerRow = nil
 	if fm.sectionRail == nil {
-		fm.sectionRail = tview.NewTextView()
-		fm.sectionRail.SetDynamicColors(true)
-		fm.sectionRail.SetWrap(false)
-		fm.sectionRail.SetBackgroundColor(fm.app.theme.ModalBackground())
-		// Registered before any field, so Tab off the last one wraps back to
-		// the list of sections rather than into the middle of this one.
-		fm.registerFocusable(fm.sectionRail, -1)
-		fm.sectionRail.SetFocusFunc(func() {
-			fm.railFocused = true
-			fm.onFocused(fm.sectionRail, -1)
-		})
-		fm.sectionRail.SetBlurFunc(func() { fm.railFocused = false })
+		fm.buildSectionRail()
 	}
-	fm.sections = append(fm.sections, formSection{name: name, first: len(fm.rows)})
+	fm.sections = append(fm.sections, formSection{name: name})
 }
 
-// SetActiveSection opens a section, leaving the keyboard on the rail so the
-// reader can keep stepping. It re-lays the modal out because the panel is
-// sized to the open section: centerModal refits on a resize, and this is the
-// other thing that changes the height.
+// buildSectionRail makes the left pane: a list of sections, and the rule that
+// divides it from the fields. There is no box around it — the rule is the
+// divider, and the lit row is what says the list has the keyboard.
+func (fm *FormModal) buildSectionRail() {
+	theme := fm.app.theme
+
+	fm.sectionRail = tview.NewTextView()
+	fm.sectionRail.SetDynamicColors(true)
+	fm.sectionRail.SetWrap(false)
+	fm.sectionRail.SetBackgroundColor(theme.ModalBackground())
+	fm.railRule = fm.app.modalColumnRule()
+
+	// Registered before any field, so Backtab off the first one reaches the
+	// list rather than wrapping to the buttons.
+	fm.registerFocusable(fm.sectionRail, -1)
+	// Only a flag: the rail is redrawn from the frame's draw func, because
+	// TextView.MouseHandler holds this view's own lock while it moves focus
+	// and SetText from here would wedge the process.
+	fm.sectionRail.SetFocusFunc(func() {
+		fm.railFocused = true
+		fm.onFocused(fm.sectionRail, -1)
+	})
+	fm.sectionRail.SetBlurFunc(func() { fm.railFocused = false })
+	// A list of sections reads as clickable, so a press picks the row under it
+	// rather than only taking focus.
+	fm.sectionRail.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		if action != tview.MouseLeftDown {
+			return action, event
+		}
+		_, y := event.Position()
+		_, railY, _, _ := fm.sectionRail.GetInnerRect()
+		if index := y - railY; index >= 0 && index < len(fm.sections) {
+			fm.SetActiveSection(index)
+		}
+		return action, event
+	})
+}
+
+// SetActiveSection opens a section. The keyboard stays where it is: stepping
+// with the arrows keeps the reader on the rail, and Tab into a section moves
+// focus itself.
 func (fm *FormModal) SetActiveSection(index int) {
 	if index < 0 || index >= len(fm.sections) || index == fm.activeSection {
 		return
@@ -335,21 +361,64 @@ func (fm *FormModal) SetActiveSection(index int) {
 	// A caller can open a section while the keyboard is on a field the new one
 	// does not show. The rail is where stepping came from and is always shown.
 	if p := fm.focusedPrimitive(); p != nil && !fm.focusReachable(p) {
-		fm.focusIdx = 0
-		fm.app.app.SetFocus(fm.order[0])
+		fm.focusRail()
 	}
+}
+
+// focusRail puts the keyboard on the section list.
+func (fm *FormModal) focusRail() {
+	if fm.sectionRail == nil {
+		return
+	}
+	for i, candidate := range fm.order {
+		if candidate == fm.sectionRail {
+			fm.focusIdx = i
+			break
+		}
+	}
+	fm.app.app.SetFocus(fm.sectionRail)
+}
+
+// enterSection moves the keyboard off the rail and onto the open section's
+// first field, which is what Enter on a list of pages should do.
+func (fm *FormModal) enterSection() {
+	for i, candidate := range fm.order {
+		if candidate == fm.sectionRail || !fm.focusReachable(candidate) {
+			continue
+		}
+		if _, inRow := fm.rowOf[candidate]; !inRow {
+			continue
+		}
+		fm.focusIdx = i
+		fm.app.app.SetFocus(candidate)
+		return
+	}
+}
+
+// railHasFocus reports whether the section list holds the keyboard.
+func (fm *FormModal) railHasFocus() bool {
+	return fm.sectionRail != nil && fm.focusedPrimitive() == fm.sectionRail
 }
 
 // rowVisible reports whether a row is laid out at all: hidden rows and rows
 // belonging to a section that is not open take no height and are not mounted.
+// A row added before the first BeginSection belongs to no section and is shown
+// on every page, since dropping it would lose the field outright.
 func (fm *FormModal) rowVisible(row formRow) bool {
+	return fm.rowVisibleIn(row, fm.activeSection)
+}
+
+// rowVisibleIn is rowVisible against a section other than the open one, for
+// sizing the panel to the tallest of them.
+func (fm *FormModal) rowVisibleIn(row formRow, section int) bool {
 	if row.hidden {
 		return false
 	}
-	return len(fm.sections) == 0 || row.section == fm.activeSection
+	return len(fm.sections) == 0 || row.section < 0 || row.section == section
 }
 
-// railWidth is the rail's column: the widest section name plus its gap.
+// railWidth is the rail's column: the widest section name, its frame and the
+// gutter inside it.
 func (fm *FormModal) railWidth() int {
 	widest := 0
 	for _, section := range fm.sections {
@@ -380,11 +449,7 @@ func (fm *FormModal) renderSectionRail() {
 		if fm.activeSection < len(fm.sections) {
 			name = fm.sections[fm.activeSection].name
 		}
-		color := tags.Accent
-		if fm.railFocused {
-			color = tags.Selection
-		}
-		fm.sectionRail.SetText(color + "‹ " + name + " ›[-:-:-]")
+		fm.sectionRail.SetText(tags.Accent + "‹ " + name + " ›[-:-:-]")
 		return
 	}
 
@@ -395,16 +460,18 @@ func (fm *FormModal) renderSectionRail() {
 			lines = append(lines, tags.SecondaryText+section.name+"[-:-:-]")
 			continue
 		}
+		// The cursor line only while the list holds the keyboard. With no box
+		// around the rail it is the only thing saying which pane a key reaches,
+		// so an open section that is not focused reads as a place, not a caret.
+		if !fm.railFocused {
+			lines = append(lines, tags.Accent+section.name+"[-:-:-]")
+			continue
+		}
 		pad := width - len([]rune(section.name))
 		if pad < 0 {
 			pad = 0
 		}
-		row := section.name + strings.Repeat(" ", pad)
-		if !fm.railFocused {
-			lines = append(lines, tags.Accent+row+"[-:-:-]")
-			continue
-		}
-		lines = append(lines, tags.Selection+row+"[-:-:-]")
+		lines = append(lines, tags.Selection+section.name+strings.Repeat(" ", pad)+"[-:-:-]")
 	}
 	fm.sectionRail.SetText(strings.Join(lines, "\n"))
 }
@@ -933,14 +1000,47 @@ func (fm *FormModal) rowHeights(screenH int) []int {
 // contentHeight is the modal's total height for the given screen height:
 // content-fit, clamped to the screen.
 func (fm *FormModal) contentHeight(screenH int) int {
-	total := fm.chromeHeight()
-	for _, h := range fm.rowHeights(screenH) {
-		total += h
-	}
+	total := fm.chromeHeight() + fm.tallestSectionRows(screenH)
 	if maxHeight := screenH - formModalScreenHMargin; total > maxHeight {
 		return maxHeight
 	}
 	return total
+}
+
+// tallestSectionRows is the content height the panel is sized to. Every
+// section gets the tallest one's height, so stepping between them never
+// resizes the modal under the reader; a short section carries the slack.
+func (fm *FormModal) tallestSectionRows(screenH int) int {
+	heights := fm.rowHeights(screenH)
+	if len(fm.sections) == 0 {
+		total := 0
+		for _, h := range heights {
+			total += h
+		}
+		return total
+	}
+
+	// heights zeroes every row the open section does not show, so the tallest
+	// is measured off the rows themselves. Only the open section's flexible
+	// rows shrink, which is the one place a screen too short still bites.
+	tallest := 0
+	for section := range fm.sections {
+		total := 0
+		for i, row := range fm.rows {
+			if !fm.rowVisibleIn(row, section) {
+				continue
+			}
+			if heights[i] > 0 && heights[i] < row.height {
+				total += heights[i]
+				continue
+			}
+			total += row.height
+		}
+		if total > tallest {
+			tallest = total
+		}
+	}
+	return tallest
 }
 
 // screenSize returns the pages' current width and height.
@@ -1043,7 +1143,10 @@ func (fm *FormModal) layoutBody() {
 	}
 	if fm.railIsVertical() {
 		fm.body.SetDirection(tview.FlexColumn).
-			AddItem(fm.sectionRail, fm.railWidth(), 0, false).
+			AddItem(fm.sectionRail, fm.railWidth()-sectionRailGap, 0, false).
+			AddItem(nil, modalGutter, 0, false).
+			AddItem(fm.railRule, 1, 0, false).
+			AddItem(nil, modalGutter+1, 0, false).
 			AddItem(fm.rowsBox, 0, 1, true)
 		return
 	}
@@ -1061,6 +1164,11 @@ func (fm *FormModal) Show(pageName string) {
 	fm.openPicker = nil
 	fm.SetStatus("", false)
 	fm.layout()
+	if len(fm.order) > 0 && !fm.focusReachable(fm.order[fm.focusIdx]) {
+		fm.focusIdx = fm.initialFocusIdx()
+		fm.focusStep(1)
+		fm.focusStep(-1)
+	}
 	fm.app.pages.AddPage(pageName, fm.page, true, true)
 	fm.app.pages.SendToFront(pageName)
 	if len(fm.order) > 0 {
@@ -1142,6 +1250,11 @@ func (fm *FormModal) BlurFrames() {
 // section that is not open is not mounted, so stopping there would put the
 // keyboard on something the reader cannot see.
 func (fm *FormModal) focusReachable(p tview.Primitive) bool {
+	if p == fm.sectionRail {
+		// One section is not a choice, so the rail is not mounted and must not
+		// take the keyboard either.
+		return len(fm.sections) > 1
+	}
 	rowIdx, ok := fm.rowOf[p]
 	if !ok || rowIdx < 0 || rowIdx >= len(fm.rows) {
 		return true
@@ -1174,7 +1287,10 @@ func (fm *FormModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		return fm.handleMenuKey(event)
 	}
 
-	if fm.focusedPrimitive() == fm.sectionRail && fm.sectionRail != nil {
+	// The rail is a pane of its own: it owns the movement keys while it holds
+	// the keyboard, which is the same rule that keeps arrows on a focused
+	// widget everywhere else, and Enter crosses into the fields.
+	if fm.railHasFocus() {
 		switch {
 		case event.Key() == tcell.KeyUp, event.Key() == tcell.KeyRune && event.Rune() == 'k':
 			fm.stepSection(-1)
@@ -1182,11 +1298,23 @@ func (fm *FormModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 		case event.Key() == tcell.KeyDown, event.Key() == tcell.KeyRune && event.Rune() == 'j':
 			fm.stepSection(1)
 			return nil
+		case event.Key() == tcell.KeyEnter,
+			event.Key() == tcell.KeyRight,
+			event.Key() == tcell.KeyRune && event.Rune() == 'l':
+			fm.enterSection()
+			return nil
 		}
 	}
 
 	switch event.Key() {
 	case tcell.KeyEscape:
+		// Esc backs out one level, the way it leaves edit mode before it
+		// leaves the pane: out of the fields to the rail, then out of the
+		// modal. Backtab off the first field is the long way round.
+		if len(fm.sections) > 1 && !fm.railHasFocus() {
+			fm.focusRail()
+			return nil
+		}
 		if fm.onCancel != nil {
 			fm.onCancel()
 		}

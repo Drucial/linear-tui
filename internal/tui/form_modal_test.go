@@ -584,34 +584,6 @@ func TestSectionsLayOutOnlyTheOpenPage(t *testing.T) {
 	}
 }
 
-// TestTheSectionRailTakesTheArrowsAndNothingElseDoes guards the routing: the
-// rail owns Up and Down while it holds the keyboard, and a field keeps them.
-func TestTheSectionRailTakesTheArrowsAndNothingElseDoes(t *testing.T) {
-	app := newUXTestApp(t)
-	app.pages.SetRect(0, 0, 100, 40)
-
-	fm := NewFormModal(app, "Test")
-	fm.BeginSection("First")
-	field := fm.AddInput("Alpha", "")
-	fm.BeginSection("Second")
-	fm.AddInput("Bravo", "")
-	fm.Show("form_test")
-
-	if app.app.GetFocus() != fm.sectionRail {
-		t.Fatal("a sectioned form did not open on its rail")
-	}
-	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
-	if fm.activeSection != 1 {
-		t.Fatalf("Down on the rail left the section at %d", fm.activeSection)
-	}
-
-	app.app.SetFocus(field)
-	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
-	if fm.activeSection != 1 {
-		t.Fatalf("Down in a field moved the section to %d, but arrows belong to the field", fm.activeSection)
-	}
-}
-
 // TestTheRailGivesUpItsColumnOnANarrowPanel covers the fold of the rail
 // itself: a column of section names is a quarter of a narrow terminal, so
 // there it names the open one on a line instead.
@@ -691,5 +663,109 @@ func TestTabSkipsFieldsInAClosedSection(t *testing.T) {
 	fm.focusStep(-1)
 	if got := app.app.GetFocus(); got == alpha {
 		t.Fatal("Backtab reached a field in the closed section")
+	}
+}
+
+// TestTheRailIsAPaneOfItsOwn covers the whole navigation model: the rail holds
+// the movement keys, Enter crosses into the fields, and Esc comes back before
+// it closes anything.
+func TestTheRailIsAPaneOfItsOwn(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	canceled := false
+	fm := NewFormModal(app, "Test")
+	fm.SetOnCancel(func() { canceled = true })
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	bravo := fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("a sectioned form did not open on its rail")
+	}
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if app.app.GetFocus() != alpha {
+		t.Fatal("Enter on the rail did not cross into the open section's first field")
+	}
+	if canceled {
+		t.Fatal("Enter on the rail closed the modal")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	if !fm.railHasFocus() {
+		t.Fatal("Esc in a field did not come back to the rail")
+	}
+	if canceled {
+		t.Fatal("Esc in a field closed the modal instead of backing out one level")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyRune, 'l', tcell.ModNone))
+	if app.app.GetFocus() != bravo {
+		t.Fatal("stepping the rail and pressing l did not reach the second section's field")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	if !canceled {
+		t.Fatal("Esc on the rail did not close the modal")
+	}
+}
+
+// TestSteppingSectionsKeepsThePanelOneSize guards the resize the reader sees:
+// the panel is sized to the tallest section, so a short one carries slack
+// rather than shrinking the modal under them.
+func TestSteppingSectionsKeepsThePanelOneSize(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Short")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Long")
+	for _, label := range []string{"Bravo", "Charlie", "Delta"} {
+		fm.AddInput(label, "")
+	}
+	fm.Show("form_test")
+
+	short := fm.contentHeight(40)
+	fm.stepSection(1)
+	if long := fm.contentHeight(40); long != short {
+		t.Fatalf("the panel is %d lines on the short section and %d on the long one", short, long)
+	}
+}
+
+// TestTheRailMarksWhichPaneHasTheKeyboard guards the only cue there is: with no
+// box around the section list, the cursor line is what says a key reaches it.
+func TestTheRailMarksWhichPaneHasTheKeyboard(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("the form did not open on the section list")
+	}
+	drawPrimitiveAt(t, fm.Root(), 100, 40)
+	focused := fm.sectionRail.GetText(false)
+	if !strings.Contains(focused, app.themeTags.Selection) {
+		t.Fatalf("the open section is not on the cursor line while the list has the keyboard: %q", focused)
+	}
+
+	fm.enterSection()
+	drawPrimitiveAt(t, fm.Root(), 100, 40)
+	blurred := fm.sectionRail.GetText(false)
+	if blurred == focused {
+		t.Fatalf("the section list looks the same with and without the keyboard: %q", blurred)
+	}
+	if strings.Contains(blurred, app.themeTags.Selection) {
+		t.Fatalf("the cursor line stayed on the list after the fields took the keyboard: %q", blurred)
 	}
 }
