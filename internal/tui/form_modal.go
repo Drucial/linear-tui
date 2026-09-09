@@ -336,10 +336,18 @@ func (fm *FormModal) buildSectionRail() {
 	// A list of sections reads as clickable, so a press picks the row under it
 	// rather than only taking focus.
 	fm.sectionRail.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		if action != tview.MouseLeftDown {
+		// The capture has to bound the press itself. tview runs it before the
+		// handler's own InRect test and a Flex offers the event to every child
+		// in turn, so without this a click on the first field picked a section.
+		// Collapsed to one line the rail is a label, not a list, so it indexes
+		// nothing.
+		if action != tview.MouseLeftDown || !fm.railIsVertical() {
 			return action, event
 		}
-		_, y := event.Position()
+		x, y := event.Position()
+		if !fm.sectionRail.InRect(x, y) {
+			return action, event
+		}
 		_, railY, _, _ := fm.sectionRail.GetInnerRect()
 		if index := y - railY; index >= 0 && index < len(fm.sections) {
 			fm.SetActiveSection(index)
@@ -386,7 +394,9 @@ func (fm *FormModal) enterSection() {
 		if candidate == fm.sectionRail || !fm.focusReachable(candidate) {
 			continue
 		}
-		if _, inRow := fm.rowOf[candidate]; !inRow {
+		// Buttons are registered against no row. A section whose rows are all
+		// hidden has nothing to cross into, and Enter must not reach Save.
+		if rowIdx, ok := fm.rowOf[candidate]; !ok || rowIdx < 0 {
 			continue
 		}
 		fm.focusIdx = i
@@ -1164,10 +1174,15 @@ func (fm *FormModal) Show(pageName string) {
 	fm.openPicker = nil
 	fm.SetStatus("", false)
 	fm.layout()
+	// An initial focus the open section does not show would put the caret on a
+	// widget that is not mounted. Scan forward for the first that is.
 	if len(fm.order) > 0 && !fm.focusReachable(fm.order[fm.focusIdx]) {
-		fm.focusIdx = fm.initialFocusIdx()
-		fm.focusStep(1)
-		fm.focusStep(-1)
+		for i, candidate := range fm.order {
+			if fm.focusReachable(candidate) {
+				fm.focusIdx = i
+				break
+			}
+		}
 	}
 	fm.app.pages.AddPage(pageName, fm.page, true, true)
 	fm.app.pages.SendToFront(pageName)

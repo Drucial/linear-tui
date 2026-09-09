@@ -769,3 +769,37 @@ func TestTheRailMarksWhichPaneHasTheKeyboard(t *testing.T) {
 		t.Fatalf("the cursor line stayed on the list after the fields took the keyboard: %q", blurred)
 	}
 }
+
+// TestAClickOnTheFieldsDoesNotPickASection guards the rail's mouse capture:
+// tview runs a capture before the handler's own bounds test and a Flex offers
+// the press to every child, so a click on the first field used to jump pages.
+func TestAClickOnTheFieldsDoesNotPickASection(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 110, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+	drawPrimitiveAt(t, fm.Root(), 110, 40)
+
+	railX, railY, railWidth, _ := fm.sectionRail.GetRect()
+	handler := fm.Root().MouseHandler()
+
+	// A press well to the right of the rail, on the row the second section
+	// sits on in the list.
+	press := tcell.NewEventMouse(railX+railWidth+20, railY+1, tcell.Button1, tcell.ModNone)
+	handler(tview.MouseLeftDown, press, func(tview.Primitive) {})
+	if fm.activeSection != 0 {
+		t.Fatalf("a click on the fields opened section %d", fm.activeSection)
+	}
+
+	// And a press on the rail itself still picks the row under it.
+	onRail := tcell.NewEventMouse(railX+1, railY+1, tcell.Button1, tcell.ModNone)
+	handler(tview.MouseLeftDown, onRail, func(tview.Primitive) {})
+	if fm.activeSection != 1 {
+		t.Fatalf("a click on the rail's second row opened section %d", fm.activeSection)
+	}
+}
