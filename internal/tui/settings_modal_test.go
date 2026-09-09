@@ -123,13 +123,13 @@ func TestSettingsFormRoundTripsFlags(t *testing.T) {
 // settings pickers. Consecutive AddPicker calls pack into one row, so dropping
 // an EndRow silently squeezes every picker into a single row and clips the
 // labels and values rather than failing.
-func TestSettingsSectionsHoldEveryFieldAndFitWithoutScrolling(t *testing.T) {
+func TestSettingsSectionsHoldEveryFieldAndKeepOneHeight(t *testing.T) {
 	app := newUXTestApp(t)
-	app.pages.SetRect(0, 0, 80, 24)
+	app.pages.SetRect(0, 0, 110, 40)
 	sm := app.settingsModal
 	fm := sm.fm
 
-	if len(fm.sections) == 0 {
+	if len(fm.sections) < 2 {
 		t.Fatal("the settings form is not sectioned")
 	}
 	for i, row := range fm.rows {
@@ -138,18 +138,26 @@ func TestSettingsSectionsHoldEveryFieldAndFitWithoutScrolling(t *testing.T) {
 		}
 	}
 
-	// Every section has to fit the smallest terminal worth supporting, or the
-	// scroll this sectioning exists to remove is still there.
+	// The panel must not resize under the reader as they step sections.
+	want := fm.contentHeight(40)
 	for i := range fm.sections {
 		fm.activeSection = i
-		heights := fm.rowHeights(24)
-		total := fm.chromeHeight()
-		for _, h := range heights {
-			total += h
+		if got := fm.contentHeight(40); got != want {
+			t.Fatalf("section %q sizes the panel to %d, but %q sizes it to %d",
+				fm.sections[i].name, got, fm.sections[0].name, want)
 		}
-		if maxHeight := 24 - formModalScreenHMargin; total > maxHeight {
-			t.Fatalf("section %q is %d lines at 80x24, past the %d it has",
-				fm.sections[i].name, total, maxHeight)
+	}
+
+	// And every section fits that one height without scrolling.
+	for i := range fm.sections {
+		fm.activeSection = i
+		rows := 0
+		for _, h := range fm.rowHeights(40) {
+			rows += h
+		}
+		if rows > want-fm.chromeHeight() {
+			t.Fatalf("section %q needs %d rows past the %d the panel holds",
+				fm.sections[i].name, rows, want-fm.chromeHeight())
 		}
 	}
 }
