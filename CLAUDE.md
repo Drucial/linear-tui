@@ -205,6 +205,56 @@ Adding a page moves focus. `Pages.AddPage` re-delegates focus to the top visible
 
 **Editing an issue's labels is the multi-select with a context line**, not a modal of its own. It was a second copy of the same toggle list until 2026-08-14. The `edit_labels` command id is unchanged; only the type went.
 
+### Form modals
+
+`form_modal.go` is the form every field-and-buttons modal is built from, and
+five of them share it. What a reader sees of the settings form is in
+[docs/configuration.md](docs/configuration.md); what follows is what the code
+has to keep true.
+
+**A row the window leaves out is not mounted.** `applyRowWindow` rebuilds
+`rowsBox` from the scroll window rather than resizing the rest to nothing,
+because a Flex hands every fixed-size child its full size whatever the
+parent's height is and only skips one whose own rect is empty. A packed row
+left mounted at zero still painted its four lines, and a framed input row
+painted its label and then handed its frame a width of minus one, so `pos`
+came back to where it started and every scrolled-off label stacked on that
+line. What they painted over was the button row, the hint and the bottom
+border. `TestScrolledOffRowsDoNotPaintOverTheChrome` draws it rather than
+counting heights: the count was right the whole time.
+
+**Every label, hint and context row has wrapping off**, since each is mounted
+exactly one line tall. `AGENT PROVIDER` in a fourteen-cell column word-wrapped
+to `AGENT` and drew only that, so three fields on the agent row read the same.
+`capsLabel` is the one constructor for a field's title and is where that rule
+lives.
+
+**`layout` goes through `centerModal`, and anything a resize changes lives in
+the `fit` closure**: the row window, the packed fold and the rail's
+orientation. It used to hand-roll the same two Flexes without the draw hook, so
+a terminal resized under an open form was never re-laid out.
+
+**A packed row's columns are data, not a place in a Flex.** `relayoutPacked`
+rebuilds the row at four, two or one from the width it is given and sets the
+height, so a row's height is not a constant and `rowHeights` reflows before it
+sums. A row folds once its widest label no longer fits its share, capped by
+`packedLabelBudget` so one long label cannot stack every row.
+
+**`BeginSection` makes a page.** Rows added after it are laid out only while
+that page is open, on the gate a hidden row already used, and a form that never
+calls it is one page. The rail is registered before any field so Tab off the
+last one wraps back to it, and it owns the arrows while it holds the keyboard,
+which is the same rule that keeps arrows on a focused widget everywhere else.
+It takes a column where the panel can spare one and names the open section on a
+line where it cannot.
+
+**The rail is written from the frame's draw func, never from a focus
+callback.** `TextView.MouseHandler` holds that view's own lock while it moves
+focus, so a callback calling `SetText` on the same view wedges the process, the
+way a click off the description editor did. And `SetActiveSection` re-lays the
+modal out, because the panel is sized to the open section and `centerModal`
+refits on a resize alone.
+
 ### Theme system
 
 The five themes and what they take from the terminal are in [docs/configuration.md](docs/configuration.md). What follows is what the code has to keep true.
