@@ -34,7 +34,9 @@ func runUpdate(out, errOut io.Writer) int {
 	case result.Available:
 		_, _ = fmt.Fprintf(out, "%s is available, running %s.\n", result.Latest, Version)
 	case result.Latest != "":
-		_, _ = fmt.Fprintf(out, "%s is the latest release, and it is what is running.\n", result.Latest)
+		// Not "it is what is running": a prerelease is ahead of the latest
+		// release rather than equal to it, and reports Available false too.
+		_, _ = fmt.Fprintf(out, "%s is the latest release. Nothing to install.\n", result.Latest)
 		return 0
 	}
 

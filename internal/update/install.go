@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 const (
@@ -27,6 +28,11 @@ const (
 	// maxScriptBytes caps what is read off the wire. Both installers are a few
 	// kilobytes.
 	maxScriptBytes = 1 << 20
+
+	// scriptTimeout bounds the fetch. It is longer than the launch check's,
+	// which is sized for a request nobody waits on: here the user has asked to
+	// upgrade and is sitting at a prompt.
+	scriptTimeout = 30 * time.Second
 )
 
 // InstallRunner executes the staged installer. Tests replace it rather than
@@ -90,6 +96,10 @@ func installScriptURL(goos string) string {
 // fetchInstallScript reads the installer. Its own timeout bounds this rather
 // than the caller's context, which has to stay open for however long the
 // download the script itself runs takes.
+//
+// It refuses a body at the cap rather than truncating to it: what comes back
+// is executed, and half an installer would run as far as the cut and report
+// whatever it exited with.
 func fetchInstallScript(ctx context.Context, opts InstallOptions) ([]byte, error) {
 	endpoint := opts.ScriptURL
 	if endpoint == "" {
@@ -97,10 +107,10 @@ func fetchInstallScript(ctx context.Context, opts InstallOptions) ([]byte, error
 	}
 	client := opts.Client
 	if client == nil {
-		client = &http.Client{Timeout: requestTimeout}
+		client = &http.Client{Timeout: scriptTimeout}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, scriptTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -118,12 +128,15 @@ func fetchInstallScript(ctx context.Context, opts InstallOptions) ([]byte, error
 		return nil, fmt.Errorf("the installer download answered %s", resp.Status)
 	}
 
-	script, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptBytes))
+	script, err := io.ReadAll(io.LimitReader(resp.Body, maxScriptBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read the installer: %w", err)
 	}
 	if len(script) == 0 {
 		return nil, errors.New("the installer download was empty")
+	}
+	if len(script) > maxScriptBytes {
+		return nil, fmt.Errorf("the installer is larger than %d bytes", maxScriptBytes)
 	}
 
 	return script, nil
@@ -174,7 +187,10 @@ func runInstallScript(ctx context.Context, script, dir string, out io.Writer) er
 	name, args := installerArgs(runtime.GOOS, script)
 
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = append(os.Environ(), "INSTALL_DIR="+dir)
+	// VERSION pins a release in both installers, and one exported in the
+	// user's shell for something else would quietly pin this. Emptied rather
+	// than dropped, since the last value of a name is the one that wins.
+	cmd.Env = append(os.Environ(), "INSTALL_DIR="+dir, "VERSION=")
 	cmd.Stdout = out
 	cmd.Stderr = out
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -208,5 +209,88 @@ func TestInstallDirIsTheRunningBinarysDirectory(t *testing.T) {
 	}
 	if dir != filepath.Dir(resolved) {
 		t.Fatalf("InstallDir = %q, want %q", dir, filepath.Dir(resolved))
+	}
+}
+
+// The real exec path, since what the installer sees in its environment is the
+// whole point of this call and a stubbed runner would not prove it.
+func TestTheInstallerSeesTheDirectoryAndNoPinnedVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the staged script is sh")
+	}
+
+	out := filepath.Join(t.TempDir(), "env")
+	t.Setenv("ZEN_TEST_OUT", out)
+	// Exported for something else entirely. It pins a release in both
+	// installers, and an update asked for by name means the latest.
+	t.Setenv("VERSION", "v9.9.9")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("#!/bin/sh\nprintf '%s|%s' \"$INSTALL_DIR\" \"${VERSION:-}\" > \"$ZEN_TEST_OUT\"\n"))
+	}))
+	defer server.Close()
+
+	if err := Install(context.Background(), InstallOptions{
+		Dir:       "/opt/bin",
+		ScriptURL: server.URL,
+	}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	seen, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(seen) != "/opt/bin|" {
+		t.Fatalf("the installer saw %q, want INSTALL_DIR set and VERSION emptied", seen)
+	}
+}
+
+// A failing installer has to fail the command, which is the whole reason the
+// script is staged rather than piped into a shell.
+func TestAFailedInstallerIsReported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the staged script is sh")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("#!/bin/sh\necho nope >&2\nexit 1\n"))
+	}))
+	defer server.Close()
+
+	err := Install(context.Background(), InstallOptions{Dir: "/opt/bin", ScriptURL: server.URL})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "run the installer") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// Half an installer would run as far as the cut and report whatever it exited
+// with, so a body at the cap is refused rather than truncated to it.
+func TestInstallRefusesAnOversizedScript(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, maxScriptBytes+1))
+	}))
+	defer server.Close()
+
+	ran := false
+	err := Install(context.Background(), InstallOptions{
+		Dir:       "/opt/bin",
+		ScriptURL: server.URL,
+		Runner: func(context.Context, string, string, io.Writer) error {
+			ran = true
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("error = %v", err)
+	}
+	if ran {
+		t.Fatal("a truncated installer was executed")
 	}
 }
