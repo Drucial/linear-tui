@@ -553,6 +553,101 @@ func TestAFoldedRowKeepsEveryFieldOnScreen(t *testing.T) {
 	}
 }
 
+// TestSectionsLayOutOnlyTheOpenPage covers the whole point of sectioning: a
+// row belonging to a section that is not open takes no height and never draws.
+func TestSectionsLayOutOnlyTheOpenPage(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	screen := strings.Join(drawPrimitiveAt(t, fm.Root(), 100, 40), "\n")
+	if !strings.Contains(screen, "ALPHA") {
+		t.Fatalf("the open section's field is missing:\n%s", screen)
+	}
+	if strings.Contains(screen, "BRAVO") {
+		t.Fatalf("a closed section's field drew anyway:\n%s", screen)
+	}
+
+	fm.stepSection(1)
+	screen = strings.Join(drawPrimitiveAt(t, fm.Root(), 100, 40), "\n")
+	if !strings.Contains(screen, "BRAVO") {
+		t.Fatalf("stepping to the second section did not open it:\n%s", screen)
+	}
+	if strings.Contains(screen, "ALPHA") {
+		t.Fatalf("the first section stayed laid out:\n%s", screen)
+	}
+}
+
+// TestTheSectionRailTakesTheArrowsAndNothingElseDoes guards the routing: the
+// rail owns Up and Down while it holds the keyboard, and a field keeps them.
+func TestTheSectionRailTakesTheArrowsAndNothingElseDoes(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	field := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if app.app.GetFocus() != fm.sectionRail {
+		t.Fatal("a sectioned form did not open on its rail")
+	}
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	if fm.activeSection != 1 {
+		t.Fatalf("Down on the rail left the section at %d", fm.activeSection)
+	}
+
+	app.app.SetFocus(field)
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	if fm.activeSection != 1 {
+		t.Fatalf("Down in a field moved the section to %d, but arrows belong to the field", fm.activeSection)
+	}
+}
+
+// TestTheRailGivesUpItsColumnOnANarrowPanel covers the fold of the rail
+// itself: a column of section names is a quarter of a narrow terminal, so
+// there it names the open one on a line instead.
+func TestTheRailGivesUpItsColumnOnANarrowPanel(t *testing.T) {
+	app := newUXTestApp(t)
+
+	fm := NewFormModal(app, "Test")
+	fm.SetMaxWidth(110)
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Network & logging")
+	fm.AddInput("Bravo", "")
+
+	app.pages.SetRect(0, 0, 110, 40)
+	if !fm.railIsVertical() {
+		t.Fatal("a wide panel did not give the rail its own column")
+	}
+	fm.Show("form_test")
+	wide := strings.Join(drawPrimitiveAt(t, fm.Root(), 110, 40), "\n")
+	if !strings.Contains(wide, "Network & logging") {
+		t.Fatalf("the rail did not list every section:\n%s", wide)
+	}
+
+	app.pages.SetRect(0, 0, 56, 40)
+	if fm.railIsVertical() {
+		t.Fatal("a narrow panel kept the rail's column")
+	}
+	narrow := strings.Join(drawPrimitiveAt(t, fm.Root(), 56, 40), "\n")
+	if !strings.Contains(narrow, "‹ Appearance ›") {
+		t.Fatalf("the narrow rail does not name the open section:\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "ALPHA") {
+		t.Fatalf("the open section's field is missing on a narrow panel:\n%s", narrow)
+	}
+}
+
 // TestAnEmbeddedFormDrawsItsFields covers the one modal that composes a form
 // beside another pane rather than showing it: it never calls Show, so
 // ContentBody is where its rows are mounted.
@@ -566,5 +661,35 @@ func TestAnEmbeddedFormDrawsItsFields(t *testing.T) {
 		if !strings.Contains(screen, label) {
 			t.Fatalf("the embedded form did not draw %q:\n%s", label, screen)
 		}
+	}
+}
+
+// TestTabSkipsFieldsInAClosedSection guards the keyboard against landing on a
+// widget the open section does not mount: the field is not on screen, so the
+// caret goes somewhere the reader cannot see it.
+func TestTabSkipsFieldsInAClosedSection(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	bravo := fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"})
+	fm.Show("form_test")
+
+	fm.stepSection(1)
+	fm.focusStep(1)
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("Tab reached a field in the closed section, which is not mounted")
+	} else if got != bravo {
+		t.Fatalf("Tab reached %T, want the open section's own field", got)
+	}
+
+	// And back the other way, which is the wrap the buttons sit on.
+	fm.focusStep(-1)
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("Backtab reached a field in the closed section")
 	}
 }
