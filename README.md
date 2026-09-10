@@ -13,6 +13,8 @@ runner. The git history here reaches back to his first commit in January 2026.
 It is an unofficial third-party client built on Linear's public API, and it is
 not affiliated with Linear.
 
+![Moving through the issue list, zooming the details pane, running a palette command, and writing a comment](docs/images/demo.gif)
+
 ## What zen-linear does
 
 Your Linear sidebar is the navigation tree, favorites in the order you keep
