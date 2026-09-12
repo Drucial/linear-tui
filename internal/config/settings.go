@@ -396,7 +396,7 @@ func LoadSettings(path string) (Settings, error) {
 	return settings, nil
 }
 
-// Written in place, not atomically, so a hardlinked config keeps its inode.
+// Written in place, not atomically, so a hard link to the config keeps its inode.
 func SaveSettings(path string, settings Settings) error {
 	if path == "" {
 		return fmt.Errorf("settings path is empty")
