@@ -834,3 +834,193 @@ func TestTheNavKeepsFocusWhenAPageIsAddedOrRemoved(t *testing.T) {
 		t.Fatalf("the section list lost the keyboard to %T", app.app.GetFocus())
 	}
 }
+
+// TestTheSidebarHoldsTheButtonsAndTheRulesMeet covers the settings chrome: the
+// actions sit under the section list rather than across the panel, and the
+// column rule closes into the footer rule in a tee. The tee is the part that
+// broke first, because a Flex defers a focused child's draw and the footer had
+// no rect to read.
+func TestTheSidebarHoldsTheButtonsAndTheRulesMeet(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 34)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	lines := drawPrimitiveAt(t, fm.Root(), 100, 34)
+	screen := strings.Join(lines, "\n")
+
+	hint, footer, save := -1, -1, -1
+	for i, line := range lines {
+		switch {
+		case strings.Contains(line, "Esc cancel"):
+			hint = i
+		case strings.Contains(line, "├") && strings.Contains(line, "┴"):
+			footer = i
+		case strings.Contains(line, "Save"):
+			save = i
+		}
+	}
+	if footer < 0 {
+		t.Fatalf("the column rule does not close into the footer rule in a tee:\n%s", screen)
+	}
+	if hint < 0 || footer != hint-1 {
+		t.Fatalf("the rule does not sit directly above the hint:\n%s", screen)
+	}
+	if save < 0 || save >= footer {
+		t.Fatalf("the buttons are not inside the sidebar, above the rule:\n%s", screen)
+	}
+	top := -1
+	for i, line := range lines {
+		if strings.Contains(line, "┌") {
+			top = i
+			break
+		}
+	}
+	if top < 0 || !strings.Contains(lines[top], "┬") {
+		t.Fatalf("the column rule does not tee into the top border:\n%s", screen)
+	}
+
+	// The buttons belong to the sidebar, so they sit left of the column rule.
+	column := strings.Index(lines[footer], "┴")
+	if got := strings.Index(lines[save], "Save"); got < 0 || got > column {
+		t.Fatalf("Save is at column %d, right of the rule at %d:\n%s", got, column, screen)
+	}
+}
+
+// TestASectionedFormSurvivesCrossingTheRailThreshold guards the frame against
+// the width: where the buttons sit depends on whether the sidebar has a
+// column, so composing the frame once left them mounted in a row the panel no
+// longer held, or in both at once.
+func TestASectionedFormSurvivesCrossingTheRailThreshold(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.SetMaxWidth(82)
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	for _, width := range []int{100, 56, 100, 56, 100} {
+		app.pages.SetRect(0, 0, width, 40)
+		lines := drawPrimitiveAt(t, fm.Root(), width, 40)
+		screen := strings.Join(lines, "\n")
+
+		if strings.Count(screen, "Save") != 1 {
+			t.Fatalf("at %d columns Save drew %d times, want once:\n%s",
+				width, strings.Count(screen, "Save"), screen)
+		}
+		if strings.Count(screen, "Cancel") != 1 {
+			t.Fatalf("at %d columns Cancel drew %d times, want once:\n%s",
+				width, strings.Count(screen, "Cancel"), screen)
+		}
+		if !strings.Contains(screen, "Esc cancel") {
+			t.Fatalf("at %d columns the hint is gone:\n%s", width, screen)
+		}
+		if !strings.Contains(screen, "ALPHA") {
+			t.Fatalf("at %d columns the open section's field is gone:\n%s", width, screen)
+		}
+	}
+}
+
+// TestTheColumnRuleLeavesTheContextRowAlone covers the one line that says which
+// fields the environment owns: the rule runs to the top border, and the context
+// row sits between that border and the body.
+func TestTheColumnRuleLeavesTheContextRowAlone(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	notice := "theme and log level are set by the environment"
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.SetContext(notice)
+	fm.Show("form_test")
+
+	for _, line := range drawPrimitiveAt(t, fm.Root(), 100, 40) {
+		if strings.Contains(line, "environment") {
+			if !strings.Contains(line, notice) {
+				t.Fatalf("the column rule struck through the context row: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatal("the context row did not draw")
+}
+
+// TestTheArrowsWalkTheWholeSidebar covers the sidebar as one column: the
+// sections and the buttons stacked under them move together, so the actions
+// are reachable without tabbing through a section's fields.
+func TestTheArrowsWalkTheWholeSidebar(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 34)
+
+	saved := false
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(
+		FormButton{Label: "Save", OnPress: func() { saved = true }},
+		FormButton{Label: "Cancel"},
+	)
+	fm.Show("form_test")
+
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	up := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+
+	fm.HandleKey(down) // Appearance -> Logging
+	if fm.activeSection != 1 {
+		t.Fatalf("first Down left the section at %d", fm.activeSection)
+	}
+	fm.HandleKey(down) // Logging -> Save
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Down off the last section reached button %d, want Save", got)
+	}
+	fm.HandleKey(down) // Save -> Cancel
+	if got := fm.focusedButton(); got != 1 {
+		t.Fatalf("Down off Save reached button %d, want Cancel", got)
+	}
+
+	fm.HandleKey(up) // Cancel -> Save
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Up off Cancel reached button %d, want Save", got)
+	}
+	fm.HandleKey(up) // Save -> the list, on the last section
+	if !fm.railHasFocus() {
+		t.Fatal("Up off the first button did not go back to the section list")
+	}
+	if fm.activeSection != 1 {
+		t.Fatalf("coming back off the buttons opened section %d, want the last one", fm.activeSection)
+	}
+
+	// And Enter on a button presses it rather than crossing into the fields.
+	fm.HandleKey(down)
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Down from the last section reached button %d, want Save", got)
+	}
+	enter := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+	// The form leaves Enter to the focused widget, the way the dispatcher does.
+	if left := fm.HandleKey(enter); left != nil {
+		if handler := app.app.GetFocus().InputHandler(); handler != nil {
+			handler(left, func(tview.Primitive) {})
+		}
+	}
+	if !saved {
+		t.Fatal("Enter on Save did not press it")
+	}
+}

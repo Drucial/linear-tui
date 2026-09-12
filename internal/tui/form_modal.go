@@ -20,12 +20,14 @@ const (
 	// packedLabelBudget caps what a packed column is asked to hold before the
 	// row folds. Without it one long label would stack every row.
 	packedLabelBudget = 16
-	// sectionRailGap is the space between the section list and the fields. It
-	// is what separates the two panes, there being no rule between them.
-	sectionRailGap = 4
+	// sectionRailSpacerRows is the blank line between two stacked buttons.
+	sectionRailSpacerRows = 1
 	// railTopPad drops the list a line so it does not start hard against the
 	// panel's top border.
 	railTopPad = 1
+	// sectionRailPad widens the sidebar past its longest name, so the cursor
+	// line and the buttons are a column rather than the width of a word.
+	sectionRailPad = 2
 	// formRowsMinWidth is what the fields need before the rail is worth a
 	// column of its own. Under it the rail names the open section on one line
 	// instead, since a rail is a quarter of a narrow terminal.
@@ -87,6 +89,7 @@ type FormModal struct {
 	rows           []formRow
 	order          []tview.Primitive
 	buttons        []*tview.Button
+	buttonLabels   []string
 	frameOf        map[tview.Primitive]*tview.Flex
 	checkboxLabels map[*tview.Checkbox]*tview.TextView
 	multiSelects   map[*tview.List]*FormMultiSelect
@@ -100,6 +103,10 @@ type FormModal struct {
 	sections       []formSection
 	activeSection  int
 	sectionRail    *tview.TextView
+	railRule       *tview.Box
+	footerRule     *tview.Box
+	navColumn      *tview.Flex
+	buttonsColumn  *tview.Flex
 	railFocused    bool
 	body           *tview.Flex
 	focusIdx       int
@@ -322,6 +329,21 @@ func (fm *FormModal) buildSectionRail() {
 	fm.sectionRail.SetDynamicColors(true)
 	fm.sectionRail.SetWrap(false)
 	fm.sectionRail.SetBackgroundColor(theme.ModalBackground())
+	fm.railRule = fm.app.modalColumnRule(func() int {
+		// A context row sits between the border and the body, so the rule
+		// stops at the body rather than striking through the one line that
+		// says which fields the environment owns.
+		if fm.contextText != "" {
+			return -1
+		}
+		_, top, _, _ := fm.frame.GetInnerRect()
+		return top
+	})
+	fm.footerRule = fm.formFooterRule()
+	fm.navColumn = tview.NewFlex().SetDirection(tview.FlexRow)
+	fm.navColumn.SetBackgroundColor(theme.ModalBackground())
+	fm.buttonsColumn = tview.NewFlex().SetDirection(tview.FlexRow)
+	fm.buttonsColumn.SetBackgroundColor(theme.ModalBackground())
 
 	// Registered before any field, so Backtab off the first one reaches the
 	// list rather than wrapping to the buttons.
@@ -355,6 +377,60 @@ func (fm *FormModal) buildSectionRail() {
 		}
 		return action, event
 	})
+}
+
+// formFooterRule is the line over the hint. It is modalRule with one addition:
+// it closes the column rule above it in a tee, which it can do because the
+// body has already drawn by the time this runs.
+func (fm *FormModal) formFooterRule() *tview.Box {
+	rule := tview.NewBox()
+	rule.SetBackgroundColor(fm.app.theme.ModalBackground())
+	rule.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		style := tcell.StyleDefault.
+			Background(fm.app.theme.ModalBackground()).
+			Foreground(fm.app.theme.BorderFocus)
+		padding := fm.app.density.ModalPadding
+		left, right := x-padding.Left-1, x+width+padding.Right
+		// Computed, not read off the rule: a Flex defers a focused child's draw,
+		// so the body has not placed the rule yet when this runs.
+		joint := -1
+		if fm.railIsVertical() {
+			joint = x + fm.railColumn() + fm.railGutter()
+		}
+		screen.SetContent(left, y, tview.Borders.LeftT, nil, style)
+		for col := left + 1; col < right; col++ {
+			glyph := tview.Borders.Horizontal
+			if col == joint {
+				glyph = tview.Borders.BottomT
+			}
+			screen.SetContent(col, y, glyph, nil, style)
+		}
+		screen.SetContent(right, y, tview.Borders.RightT, nil, style)
+		return x, y, width, height
+	})
+	return rule
+}
+
+// buildButtonsColumn stacks the actions down the sidebar, for a form whose
+// buttons belong under the section list rather than across the panel.
+func (fm *FormModal) buildButtonsColumn() {
+	fm.buttonsColumn.Clear()
+	for i, btn := range fm.buttons {
+		if i > 0 {
+			fm.buttonsColumn.AddItem(nil, sectionRailSpacerRows, 0, false)
+		}
+		// The full column, like the cursor line above them. A Button centers
+		// its own label in the width it is given.
+		fm.buttonsColumn.AddItem(btn, 1, 0, false)
+	}
+}
+
+// buttonsColumnRows is what the stacked buttons cost, blank lines included.
+func (fm *FormModal) buttonsColumnRows() int {
+	if len(fm.buttons) == 0 {
+		return 0
+	}
+	return len(fm.buttons) + (len(fm.buttons)-1)*sectionRailSpacerRows
 }
 
 // SetActiveSection opens a section. The keyboard stays where it is: stepping
@@ -428,6 +504,24 @@ func (fm *FormModal) rowVisibleIn(row formRow, section int) bool {
 	return len(fm.sections) == 0 || row.section < 0 || row.section == section
 }
 
+// railGutter is the space each side of the column rule. It matches the panel's
+// own border padding, so the sidebar sits the same distance from the rule as
+// it does from the border and its cursor line reads as centered.
+func (fm *FormModal) railGutter() int {
+	return fm.app.density.ModalPadding.Left
+}
+
+// railGap is what the rail costs beyond its own column: a gutter either side
+// of the rule, and the rule.
+func (fm *FormModal) railGap() int {
+	return fm.railGutter()*2 + 1
+}
+
+// railColumn is the sidebar's own width.
+func (fm *FormModal) railColumn() int {
+	return fm.railWidth() - fm.railGap()
+}
+
 // railWidth is the rail's column: the widest section name, its frame and the
 // gutter inside it.
 func (fm *FormModal) railWidth() int {
@@ -437,7 +531,7 @@ func (fm *FormModal) railWidth() int {
 			widest = length
 		}
 	}
-	return widest + sectionRailGap
+	return widest + sectionRailPad + fm.railGap()
 }
 
 // railIsVertical reports whether the panel can spare a column for the rail.
@@ -464,7 +558,7 @@ func (fm *FormModal) renderSectionRail() {
 		return
 	}
 
-	width := fm.railWidth() - sectionRailGap
+	width := fm.railColumn()
 	lines := make([]string, 0, len(fm.sections)+railTopPad)
 	for range railTopPad {
 		lines = append(lines, "")
@@ -496,6 +590,60 @@ func (fm *FormModal) stepSection(delta int) {
 		return
 	}
 	fm.SetActiveSection((fm.activeSection + delta + len(fm.sections)) % len(fm.sections))
+}
+
+// sidebarStops is what the arrows walk while the keyboard is in the sidebar:
+// the sections, then the buttons stacked under them. They read as one column,
+// so they move as one.
+func (fm *FormModal) sidebarStops() int {
+	return len(fm.sections) + len(fm.buttons)
+}
+
+// focusedButton returns the index of the button holding the keyboard, or -1.
+func (fm *FormModal) focusedButton() int {
+	focused := fm.focusedPrimitive()
+	for i, btn := range fm.buttons {
+		if btn == focused {
+			return i
+		}
+	}
+	return -1
+}
+
+// focusButton puts the keyboard on one of the stacked actions.
+func (fm *FormModal) focusButton(index int) {
+	if index < 0 || index >= len(fm.buttons) {
+		return
+	}
+	target := fm.buttons[index]
+	for i, candidate := range fm.order {
+		if candidate == target {
+			fm.focusIdx = i
+			break
+		}
+	}
+	fm.app.app.SetFocus(target)
+}
+
+// stepSidebar moves the cursor down the sidebar, wrapping, and carries the
+// keyboard with it: onto a section it lands on the list, onto a button it
+// lands on the button so Enter presses it.
+func (fm *FormModal) stepSidebar(delta int) {
+	stops := fm.sidebarStops()
+	if stops == 0 {
+		return
+	}
+	at := fm.activeSection
+	if button := fm.focusedButton(); button >= 0 {
+		at = len(fm.sections) + button
+	}
+	next := (at + delta + stops) % stops
+	if next < len(fm.sections) {
+		fm.SetActiveSection(next)
+		fm.focusRail()
+		return
+	}
+	fm.focusButton(next - len(fm.sections))
 }
 
 // EndRow closes the row consecutive AddPicker and AddPackedInput calls are
@@ -918,6 +1066,7 @@ func (fm *FormModal) AddButtons(buttons ...FormButton) {
 		}
 		fm.buttonsRow.AddItem(btn, len(spec.Label)+4, 0, false)
 		fm.buttons = append(fm.buttons, btn)
+		fm.buttonLabels = append(fm.buttonLabels, spec.Label)
 		fm.registerFocusable(btn, -1)
 	}
 	fm.buttonsRow.AddItem(nil, 0, 1, false)
@@ -934,6 +1083,15 @@ func (fm *FormModal) effectiveMaxWidth() int {
 // chromeHeight counts the non-row lines inside the modal: border, the
 // blank-plus-buttons block when present, and the gap plus hint line.
 func (fm *FormModal) chromeHeight() int {
+	if fm.railIsVertical() {
+		// Border, the rule over the hint, and the hint. The buttons are in the
+		// sidebar and cost the body nothing.
+		chrome := 2 + 1 + 1
+		if fm.contextText != "" {
+			chrome += 2
+		}
+		return chrome
+	}
 	chrome := 2 + 1 + 1 // border + gap + hint
 	if fm.buttonsRow != nil {
 		chrome += 2 // blank spacer + button row
@@ -1037,7 +1195,12 @@ func (fm *FormModal) tallestSectionRows(screenH int) int {
 	// heights zeroes every row the open section does not show, so the tallest
 	// is measured off the rows themselves. Only the open section's flexible
 	// rows shrink, which is the one place a screen too short still bites.
+	// The sidebar has to fit too, but only where it is drawn: collapsed to a
+	// line its list costs the body nothing and the buttons take their own row.
 	tallest := 0
+	if fm.railIsVertical() {
+		tallest = railTopPad + len(fm.sections) + fm.buttonsColumnRows()
+	}
 	for section := range fm.sections {
 		total := 0
 		for i, row := range fm.rows {
@@ -1125,26 +1288,41 @@ func (fm *FormModal) applyRowWindow(heights []int, avail int) []int {
 // the screen, but the row window does, so it is computed inside the fit closure
 // centerModal asks again on every resize.
 func (fm *FormModal) layout() {
+	centerModal(fm.root, fm.frame, func() (int, int) {
+		_, screenH := fm.screenSize()
+		fm.layoutFrame()
+		fm.layoutBody()
+		height := fm.contentHeight(screenH)
+		fm.applyRowWindow(fm.rowHeights(screenH), height-fm.chromeHeight())
+		return fm.panelWidth(), height
+	})
+}
+
+// layoutFrame fills the panel. Where the buttons sit depends on whether the
+// sidebar has a column, so this is a resize away from changing and belongs in
+// the fit closure with everything else the width decides. Composed once
+// outside it, a resize past the threshold left the buttons mounted in a row
+// the frame no longer held, or in both at once.
+func (fm *FormModal) layoutFrame() {
 	fm.frame.Clear()
 	if fm.contextText != "" {
 		fm.frame.AddItem(fm.contextView, 1, 0, false)
 		fm.frame.AddItem(nil, 1, 0, false)
 	}
 	fm.frame.AddItem(fm.body, 0, 1, true)
+	if fm.railIsVertical() {
+		// The buttons moved into the sidebar, so the panel's own footer is the
+		// rule and the hint.
+		fm.frame.AddItem(fm.footerRule, 1, 0, false)
+		fm.frame.AddItem(fm.hintView, 1, 0, false)
+		return
+	}
 	if fm.buttonsRow != nil {
 		fm.frame.AddItem(nil, 1, 0, false)
 		fm.frame.AddItem(fm.buttonsRow, 1, 0, false)
 	}
 	fm.frame.AddItem(nil, 1, 0, false)
 	fm.frame.AddItem(fm.hintView, 1, 0, false)
-
-	centerModal(fm.root, fm.frame, func() (int, int) {
-		_, screenH := fm.screenSize()
-		fm.layoutBody()
-		height := fm.contentHeight(screenH)
-		fm.applyRowWindow(fm.rowHeights(screenH), height-fm.chromeHeight())
-		return fm.panelWidth(), height
-	})
 }
 
 // layoutBody puts the rail beside the rows where the panel can spare a column
@@ -1161,9 +1339,17 @@ func (fm *FormModal) layoutBody() {
 		// that walk takes whichever child is flagged: flagged on the rows, it
 		// landed on the first field and took the keyboard off the list that
 		// Show had just given it.
+		fm.buildButtonsColumn()
+		fm.navColumn.Clear()
+		fm.navColumn.AddItem(fm.sectionRail, 0, 1, true)
+		if rows := fm.buttonsColumnRows(); rows > 0 {
+			fm.navColumn.AddItem(fm.buttonsColumn, rows, 0, false)
+		}
 		fm.body.SetDirection(tview.FlexColumn).
-			AddItem(fm.sectionRail, fm.railWidth()-sectionRailGap, 0, true).
-			AddItem(nil, sectionRailGap, 0, false).
+			AddItem(fm.navColumn, fm.railColumn(), 0, true).
+			AddItem(nil, fm.railGutter(), 0, false).
+			AddItem(fm.railRule, 1, 0, false).
+			AddItem(nil, fm.railGutter(), 0, false).
 			AddItem(fm.rowsBox, 0, 1, false)
 		return
 	}
@@ -1312,6 +1498,25 @@ func (fm *FormModal) HandleKey(event *tcell.EventKey) *tcell.EventKey {
 	// The rail is a pane of its own: it owns the movement keys while it holds
 	// the keyboard, which is the same rule that keeps arrows on a focused
 	// widget everywhere else, and Enter crosses into the fields.
+	// The sidebar is one column of stops, the sections and then the buttons
+	// under them, so the arrows walk the whole of it rather than the list
+	// alone. Only where the sidebar is drawn: collapsed, the buttons are back
+	// in their own row across the panel.
+	if fm.railIsVertical() && (fm.railHasFocus() || fm.focusedButton() >= 0) {
+		switch {
+		case event.Key() == tcell.KeyUp, event.Key() == tcell.KeyRune && event.Rune() == 'k':
+			fm.stepSidebar(-1)
+			return nil
+		case event.Key() == tcell.KeyDown, event.Key() == tcell.KeyRune && event.Rune() == 'j':
+			fm.stepSidebar(1)
+			return nil
+		case fm.railHasFocus() && (event.Key() == tcell.KeyEnter ||
+			event.Key() == tcell.KeyRight ||
+			event.Key() == tcell.KeyRune && event.Rune() == 'l'):
+			fm.enterSection()
+			return nil
+		}
+	}
 	if fm.railHasFocus() {
 		switch {
 		case event.Key() == tcell.KeyUp, event.Key() == tcell.KeyRune && event.Rune() == 'k':
