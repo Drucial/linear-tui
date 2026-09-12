@@ -790,16 +790,47 @@ func TestAClickOnTheFieldsDoesNotPickASection(t *testing.T) {
 
 	// A press well to the right of the rail, on the row the second section
 	// sits on in the list.
-	press := tcell.NewEventMouse(railX+railWidth+20, railY+1, tcell.Button1, tcell.ModNone)
+	press := tcell.NewEventMouse(railX+railWidth+20, railY+railTopPad+1, tcell.Button1, tcell.ModNone)
 	handler(tview.MouseLeftDown, press, func(tview.Primitive) {})
 	if fm.activeSection != 0 {
 		t.Fatalf("a click on the fields opened section %d", fm.activeSection)
 	}
 
 	// And a press on the rail itself still picks the row under it.
-	onRail := tcell.NewEventMouse(railX+1, railY+1, tcell.Button1, tcell.ModNone)
+	onRail := tcell.NewEventMouse(railX+1, railY+railTopPad+1, tcell.Button1, tcell.ModNone)
 	handler(tview.MouseLeftDown, onRail, func(tview.Primitive) {})
 	if fm.activeSection != 1 {
 		t.Fatalf("a click on the rail's second row opened section %d", fm.activeSection)
+	}
+}
+
+// TestTheNavKeepsFocusWhenAPageIsAddedOrRemoved guards the open focus against
+// tview's own focus walk: Pages re-delegates down the tree on every page add
+// and remove, taking whichever child the body flagged. Flagged on the rows, it
+// landed on the first field and took the keyboard off the list Show had just
+// given it.
+func TestTheNavKeepsFocusWhenAPageIsAddedOrRemoved(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 110, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("the form did not open on the section list")
+	}
+
+	// Any page coming or going re-delegates focus through the modal's tree.
+	app.pages.AddPage("decoy", tview.NewBox(), true, false)
+	app.pages.RemovePage("decoy")
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("a page add and remove moved the keyboard onto the first field")
+	}
+	if !fm.railHasFocus() {
+		t.Fatalf("the section list lost the keyboard to %T", app.app.GetFocus())
 	}
 }

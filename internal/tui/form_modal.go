@@ -20,9 +20,12 @@ const (
 	// packedLabelBudget caps what a packed column is asked to hold before the
 	// row folds. Without it one long label would stack every row.
 	packedLabelBudget = 16
-	// sectionRailGap is what the rail costs beyond its widest name: a gutter
-	// each side of the rule that divides it from the fields.
+	// sectionRailGap is the space between the section list and the fields. It
+	// is what separates the two panes, there being no rule between them.
 	sectionRailGap = 4
+	// railTopPad drops the list a line so it does not start hard against the
+	// panel's top border.
+	railTopPad = 1
 	// formRowsMinWidth is what the fields need before the rail is worth a
 	// column of its own. Under it the rail names the open section on one line
 	// instead, since a rail is a quarter of a narrow terminal.
@@ -97,7 +100,6 @@ type FormModal struct {
 	sections       []formSection
 	activeSection  int
 	sectionRail    *tview.TextView
-	railRule       *tview.Box
 	railFocused    bool
 	body           *tview.Flex
 	focusIdx       int
@@ -320,7 +322,6 @@ func (fm *FormModal) buildSectionRail() {
 	fm.sectionRail.SetDynamicColors(true)
 	fm.sectionRail.SetWrap(false)
 	fm.sectionRail.SetBackgroundColor(theme.ModalBackground())
-	fm.railRule = fm.app.modalColumnRule()
 
 	// Registered before any field, so Backtab off the first one reaches the
 	// list rather than wrapping to the buttons.
@@ -349,7 +350,7 @@ func (fm *FormModal) buildSectionRail() {
 			return action, event
 		}
 		_, railY, _, _ := fm.sectionRail.GetInnerRect()
-		if index := y - railY; index >= 0 && index < len(fm.sections) {
+		if index := y - railY - railTopPad; index >= 0 && index < len(fm.sections) {
 			fm.SetActiveSection(index)
 		}
 		return action, event
@@ -464,7 +465,10 @@ func (fm *FormModal) renderSectionRail() {
 	}
 
 	width := fm.railWidth() - sectionRailGap
-	lines := make([]string, 0, len(fm.sections))
+	lines := make([]string, 0, len(fm.sections)+railTopPad)
+	for range railTopPad {
+		lines = append(lines, "")
+	}
 	for i, section := range fm.sections {
 		if i != fm.activeSection {
 			lines = append(lines, tags.SecondaryText+section.name+"[-:-:-]")
@@ -1152,18 +1156,21 @@ func (fm *FormModal) layoutBody() {
 		return
 	}
 	if fm.railIsVertical() {
+		// The list carries the Flex's focus flag, not the fields. Pages
+		// re-delegates focus down the tree on every page add and remove, and
+		// that walk takes whichever child is flagged: flagged on the rows, it
+		// landed on the first field and took the keyboard off the list that
+		// Show had just given it.
 		fm.body.SetDirection(tview.FlexColumn).
-			AddItem(fm.sectionRail, fm.railWidth()-sectionRailGap, 0, false).
-			AddItem(nil, modalGutter, 0, false).
-			AddItem(fm.railRule, 1, 0, false).
-			AddItem(nil, modalGutter+1, 0, false).
-			AddItem(fm.rowsBox, 0, 1, true)
+			AddItem(fm.sectionRail, fm.railWidth()-sectionRailGap, 0, true).
+			AddItem(nil, sectionRailGap, 0, false).
+			AddItem(fm.rowsBox, 0, 1, false)
 		return
 	}
 	fm.body.SetDirection(tview.FlexRow).
-		AddItem(fm.sectionRail, 1, 0, false).
+		AddItem(fm.sectionRail, 1, 0, true).
 		AddItem(nil, 1, 0, false).
-		AddItem(fm.rowsBox, 0, 1, true)
+		AddItem(fm.rowsBox, 0, 1, false)
 }
 
 // Show lays the modal out for the current screen, resets focus to the first
