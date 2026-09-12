@@ -327,7 +327,7 @@ func NewSettingsModal(app *App) *SettingsModal {
 	)
 	sm.fm.SetOnSubmit(sm.saveSettings)
 	sm.fm.SetOnCancel(sm.Hide)
-	sm.fm.SetHint("↑↓ section · ⏎ fields · Tab next · Esc back · ⌃⏎ save")
+	sm.fm.SetHint("↑↓ sidebar · ⏎ fields · Tab next · Esc back · ⌃⏎ save")
 
 	return sm
 }
