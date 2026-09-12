@@ -205,6 +205,100 @@ Adding a page moves focus. `Pages.AddPage` re-delegates focus to the top visible
 
 **Editing an issue's labels is the multi-select with a context line**, not a modal of its own. It was a second copy of the same toggle list until 2026-08-14. The `edit_labels` command id is unchanged; only the type went.
 
+### Form modals
+
+`form_modal.go` is the form every field-and-buttons modal is built from, and
+five of them share it. What a reader sees of the settings form is in
+[docs/configuration.md](docs/configuration.md); what follows is what the code
+has to keep true.
+
+**A row the window leaves out is not mounted.** `applyRowWindow` rebuilds
+`rowsBox` from the scroll window rather than resizing the rest to nothing,
+because a Flex hands every fixed-size child its full size whatever the
+parent's height is and only skips one whose own rect is empty. A packed row
+left mounted at zero still painted its four lines, and a framed input row
+painted its label and then handed its frame a width of minus one, so `pos`
+came back to where it started and every scrolled-off label stacked on that
+line. What they painted over was the button row, the hint and the bottom
+border. `TestScrolledOffRowsDoNotPaintOverTheChrome` draws it rather than
+counting heights: the count was right the whole time.
+
+**Every label has wrapping off**, since each is mounted exactly one line tall.
+`AGENT PROVIDER` in a fourteen-cell column word-wrapped to `AGENT` and drew only
+that, so three fields on the agent row read the same. `capsLabel` is the one
+constructor for a field's title and is where that rule lives. **The hint is the
+exception and keeps wrapping**, because it is centered and tview centers the
+untruncated line: turning wrap off there clips both ends and loses Esc and the
+save key rather than the tail.
+
+**`layout` goes through `centerModal`, and anything a resize changes lives in
+the `fit` closure**: the row window, the packed fold, the rail's orientation
+and, because where the buttons sit depends on whether the sidebar has a column,
+the frame's own composition. It used to hand-roll the same two Flexes without
+the draw hook, so a terminal resized under an open form was never re-laid out;
+`layoutFrame` composed once outside the closure was the same mistake a second
+time, and crossing the threshold left the buttons mounted in a row the panel no
+longer held, or in both at once.
+
+**A packed row's columns are data, not a place in a Flex.** `relayoutPacked`
+rebuilds the row at four, two or one from the width it is given and sets the
+height, so a row's height is not a constant and `rowHeights` reflows before it
+sums. A row folds once its widest label no longer fits its share, capped by
+`packedLabelBudget` so one long label cannot stack every row.
+
+**`BeginSection` makes a page.** Rows added after it are laid out only while
+that page is open, and a row added before the first one belongs to no section
+and is shown on every page, since dropping it would lose the field outright. A
+form that never calls `BeginSection` is one page, which is every other modal.
+
+**The section list is a pane, not a tab stop with arrows on it.** It owns the
+movement keys while it holds the keyboard, and `⏎`, `l` or `→` cross into the
+fields; `Esc` comes back before it closes anything, the way it leaves edit mode
+before it leaves the pane. Backtab off the first field is the long way round and
+Tab never stops on a field the open section does not mount (`focusReachable`).
+Pane numbers and `h`/`l` from the fields cannot work here the way they do in the
+app: every field takes free text, so digits and letters have to type, and the
+arrows move the caret.
+
+**The sidebar is one column of stops** (`stepSidebar`): the sections, then the
+buttons stacked under them, wrapping at both ends. The keyboard follows the
+cursor, so a section lands on the list and a button lands on the button, and
+`⏎` presses it rather than crossing into the fields. Reaching Save only by
+tabbing through a section's fields is what this replaced. It runs only where
+the sidebar has a column, since a collapsed rail puts the buttons back in their
+own row across the panel.
+
+**The rule is the divider and the cursor line is the focus.** There is no box
+around the list: `modalColumnRule` runs from the panel's top border down to
+`formFooterRule` over the hint, teeing into both. The footer computes that
+junction column rather than reading the rule's rect, because a Flex defers a
+focused child's draw and the body has not placed the rule yet when the footer
+runs. The rule stops at the body when a context row is present, or it strikes
+through the one line naming the fields the environment owns. The lit row is the
+only thing saying which pane a key reaches, and it is drawn only while the list
+has the keyboard: a list that looked selected either way said nothing. Where
+the panel cannot spare the column the rail names the open section on a single
+line instead, and the buttons go back to their row across the panel.
+
+**Both gutters either side of the rule come from the panel's own border
+padding** (`railGutter`), so the sidebar sits the same distance from the rule as
+from the border and its cursor line reads as centered. A one-column gutter
+against a two-column padding did not.
+
+**The panel is sized to the tallest section** (`tallestSectionRows`), so
+stepping never resizes the modal under the reader and a short section carries
+the slack. `rowHeights` zeroes every row the open section does not show, so the
+tallest is measured off the rows themselves rather than off those heights. The
+sidebar is a floor on that height, its list plus its buttons and the blank rows
+between them, but only where it is drawn.
+
+**The rail is written from the frame's draw func, never from a focus
+callback.** `TextView.MouseHandler` holds that view's own lock while it moves
+focus, so a callback calling `SetText` on the same view wedges the process, the
+way a click off the description editor did. And `SetActiveSection` re-lays the
+modal out, because the panel is sized to the open section and `centerModal`
+refits on a resize alone.
+
 ### Theme system
 
 The five themes and what they take from the terminal are in [docs/configuration.md](docs/configuration.md). What follows is what the code has to keep true.

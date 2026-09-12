@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/praxis-labs-io/zen-linear/internal/config"
 	"github.com/rivo/tview"
 )
 
@@ -418,5 +421,606 @@ func TestFormModalMenuClosesWhenFocusLeavesIt(t *testing.T) {
 	capture(tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone))
 	if fm.openPicker != nil {
 		t.Fatal("keys are still routed into the menu")
+	}
+}
+
+// TestScrolledOffRowsDoNotPaintOverTheChrome guards the whole overlap class: a
+// Flex hands every fixed-size child its full size whatever the parent's height
+// is, so rows left mounted at zero used to paint over the buttons, the hint and
+// the panel's bottom border, and consecutive input labels stacked on one line.
+func TestScrolledOffRowsDoNotPaintOverTheChrome(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 80, 24)
+
+	fm := NewFormModal(app, "Test")
+	labels := []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"}
+	for _, label := range labels {
+		fm.AddInput(label, "")
+	}
+	fm.AddPicker("India", []string{"one"}, 0, nil)
+	fm.AddPicker("Juliett", []string{"one"}, 0, nil)
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	lines := drawPrimitiveAt(t, fm.Root(), 80, 24)
+	screen := strings.Join(lines, "\n")
+
+	if !strings.Contains(screen, "Save") || !strings.Contains(screen, "Cancel") {
+		t.Fatalf("the button row is not on screen:\n%s", screen)
+	}
+	if !strings.Contains(screen, "Esc cancel") {
+		t.Fatalf("the hint line is not on screen:\n%s", screen)
+	}
+
+	// Whatever the window holds, it holds a prefix of the rows: a label from
+	// further down than the last one drawn means that row painted outside it.
+	last := -1
+	for i, label := range labels {
+		if strings.Contains(screen, strings.ToUpper(label)) {
+			last = i
+		}
+	}
+	if last < 0 {
+		t.Fatalf("no field label drew at all:\n%s", screen)
+	}
+	for i, label := range labels {
+		if i <= last {
+			continue
+		}
+		if strings.Contains(screen, strings.ToUpper(label)) {
+			t.Fatalf("%q is off the window but painted anyway:\n%s", label, screen)
+		}
+	}
+	for _, label := range []string{"INDIA", "JULIETT"} {
+		if strings.Contains(screen, label) {
+			t.Fatalf("packed row %q is off the window but painted anyway:\n%s", label, screen)
+		}
+	}
+}
+
+// TestPackedLabelsTruncateRatherThanWrap guards the duplicate-label bug: a
+// label view is one line tall, so a wrapping label drew only its first word and
+// two fields on a row read the same.
+func TestPackedLabelsTruncateRatherThanWrap(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 50, 30)
+
+	fm := NewFormModal(app, "Test")
+	fm.AddPicker("Agent provider", []string{"one"}, 0, nil)
+	fm.AddPicker("Agent sandbox", []string{"one"}, 0, nil)
+	fm.AddPicker("Agent model", []string{"one"}, 0, nil)
+	fm.Show("form_test")
+
+	lines := drawPrimitiveAt(t, fm.Root(), 50, 30)
+	drawn := map[string]bool{}
+	for _, line := range lines {
+		for _, label := range regexp.MustCompile(`\s{2,}`).Split(strings.TrimSpace(line), -1) {
+			if strings.HasPrefix(label, "AGENT") {
+				drawn[label] = true
+			}
+		}
+	}
+	if len(drawn) != 3 {
+		t.Fatalf("three labels drew %d distinct texts, so at least two read the same:\n%s",
+			len(drawn), strings.Join(lines, "\n"))
+	}
+}
+
+// TestPackedRowFoldsWhenColumnsGetNarrow covers the reflow: a row of four
+// fields is one line while each column holds its label, and stacks rather than
+// truncating everything once they do not.
+func TestPackedRowFoldsWhenColumnsGetNarrow(t *testing.T) {
+	app := newUXTestApp(t)
+	fm := NewFormModal(app, "Test")
+	for _, label := range []string{"Timeout", "Page size", "Cache TTL", "Debounce"} {
+		fm.AddPackedInput(label, "")
+	}
+
+	for _, tc := range []struct {
+		screenW int
+		want    int
+	}{
+		{120, formFieldRows},
+		{50, formFieldRows * 2},
+		{20, formFieldRows * 4},
+	} {
+		app.pages.SetRect(0, 0, tc.screenW, 40)
+		if got := fm.rowHeights(40)[0]; got != tc.want {
+			t.Fatalf("at %d columns the packed row is %d lines, want %d", tc.screenW, got, tc.want)
+		}
+	}
+}
+
+// TestAFoldedRowKeepsEveryFieldOnScreen guards the point of folding: the
+// fields that moved to a second line are drawn, not dropped.
+func TestAFoldedRowKeepsEveryFieldOnScreen(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 50, 40)
+
+	fm := NewFormModal(app, "Test")
+	labels := []string{"Timeout", "Page size", "Cache TTL", "Debounce"}
+	for _, label := range labels {
+		fm.AddPackedInput(label, "")
+	}
+	fm.Show("form_test")
+
+	screen := strings.Join(drawPrimitiveAt(t, fm.Root(), 50, 40), "\n")
+	for _, label := range labels {
+		if !strings.Contains(screen, strings.ToUpper(label)) {
+			t.Fatalf("%q is missing after the fold:\n%s", label, screen)
+		}
+	}
+}
+
+// TestSectionsLayOutOnlyTheOpenPage covers the whole point of sectioning: a
+// row belonging to a section that is not open takes no height and never draws.
+func TestSectionsLayOutOnlyTheOpenPage(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	screen := strings.Join(drawPrimitiveAt(t, fm.Root(), 100, 40), "\n")
+	if !strings.Contains(screen, "ALPHA") {
+		t.Fatalf("the open section's field is missing:\n%s", screen)
+	}
+	if strings.Contains(screen, "BRAVO") {
+		t.Fatalf("a closed section's field drew anyway:\n%s", screen)
+	}
+
+	fm.stepSection(1)
+	screen = strings.Join(drawPrimitiveAt(t, fm.Root(), 100, 40), "\n")
+	if !strings.Contains(screen, "BRAVO") {
+		t.Fatalf("stepping to the second section did not open it:\n%s", screen)
+	}
+	if strings.Contains(screen, "ALPHA") {
+		t.Fatalf("the first section stayed laid out:\n%s", screen)
+	}
+}
+
+// TestTheRailGivesUpItsColumnOnANarrowPanel covers the fold of the rail
+// itself: a column of section names is a quarter of a narrow terminal, so
+// there it names the open one on a line instead.
+func TestTheRailGivesUpItsColumnOnANarrowPanel(t *testing.T) {
+	app := newUXTestApp(t)
+
+	fm := NewFormModal(app, "Test")
+	fm.SetMaxWidth(110)
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Network & logging")
+	fm.AddInput("Bravo", "")
+
+	app.pages.SetRect(0, 0, 110, 40)
+	if !fm.railIsVertical() {
+		t.Fatal("a wide panel did not give the rail its own column")
+	}
+	fm.Show("form_test")
+	wide := strings.Join(drawPrimitiveAt(t, fm.Root(), 110, 40), "\n")
+	if !strings.Contains(wide, "Network & logging") {
+		t.Fatalf("the rail did not list every section:\n%s", wide)
+	}
+
+	app.pages.SetRect(0, 0, 56, 40)
+	if fm.railIsVertical() {
+		t.Fatal("a narrow panel kept the rail's column")
+	}
+	narrow := strings.Join(drawPrimitiveAt(t, fm.Root(), 56, 40), "\n")
+	if !strings.Contains(narrow, "‹ Appearance ›") {
+		t.Fatalf("the narrow rail does not name the open section:\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "ALPHA") {
+		t.Fatalf("the open section's field is missing on a narrow panel:\n%s", narrow)
+	}
+}
+
+// TestAnEmbeddedFormDrawsItsFields covers the one modal that composes a form
+// beside another pane rather than showing it: it never calls Show, so
+// ContentBody is where its rows are mounted.
+func TestAnEmbeddedFormDrawsItsFields(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+	app.promptTemplatesModal.Show(nil, func([]config.AgentPromptTemplate) error { return nil })
+
+	screen := strings.Join(drawPrimitiveAt(t, app.promptTemplatesModal.modal, 100, 40), "\n")
+	for _, label := range []string{"NAME", "PROMPT"} {
+		if !strings.Contains(screen, label) {
+			t.Fatalf("the embedded form did not draw %q:\n%s", label, screen)
+		}
+	}
+}
+
+// TestTabSkipsFieldsInAClosedSection guards the keyboard against landing on a
+// widget the open section does not mount: the field is not on screen, so the
+// caret goes somewhere the reader cannot see it.
+func TestTabSkipsFieldsInAClosedSection(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	bravo := fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"})
+	fm.Show("form_test")
+
+	fm.stepSection(1)
+	fm.focusStep(1)
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("Tab reached a field in the closed section, which is not mounted")
+	} else if got != bravo {
+		t.Fatalf("Tab reached %T, want the open section's own field", got)
+	}
+
+	// And back the other way, which is the wrap the buttons sit on.
+	fm.focusStep(-1)
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("Backtab reached a field in the closed section")
+	}
+}
+
+// TestTheRailIsAPaneOfItsOwn covers the whole navigation model: the rail holds
+// the movement keys, Enter crosses into the fields, and Esc comes back before
+// it closes anything.
+func TestTheRailIsAPaneOfItsOwn(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	canceled := false
+	fm := NewFormModal(app, "Test")
+	fm.SetOnCancel(func() { canceled = true })
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	bravo := fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("a sectioned form did not open on its rail")
+	}
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if app.app.GetFocus() != alpha {
+		t.Fatal("Enter on the rail did not cross into the open section's first field")
+	}
+	if canceled {
+		t.Fatal("Enter on the rail closed the modal")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	if !fm.railHasFocus() {
+		t.Fatal("Esc in a field did not come back to the rail")
+	}
+	if canceled {
+		t.Fatal("Esc in a field closed the modal instead of backing out one level")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyRune, 'l', tcell.ModNone))
+	if app.app.GetFocus() != bravo {
+		t.Fatal("stepping the rail and pressing l did not reach the second section's field")
+	}
+
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	fm.HandleKey(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	if !canceled {
+		t.Fatal("Esc on the rail did not close the modal")
+	}
+}
+
+// TestSteppingSectionsKeepsThePanelOneSize guards the resize the reader sees:
+// the panel is sized to the tallest section, so a short one carries slack
+// rather than shrinking the modal under them.
+func TestSteppingSectionsKeepsThePanelOneSize(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Short")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Long")
+	for _, label := range []string{"Bravo", "Charlie", "Delta"} {
+		fm.AddInput(label, "")
+	}
+	fm.Show("form_test")
+
+	short := fm.contentHeight(40)
+	fm.stepSection(1)
+	if long := fm.contentHeight(40); long != short {
+		t.Fatalf("the panel is %d lines on the short section and %d on the long one", short, long)
+	}
+}
+
+// TestTheRailMarksWhichPaneHasTheKeyboard guards the only cue there is: with no
+// box around the section list, the cursor line is what says a key reaches it.
+func TestTheRailMarksWhichPaneHasTheKeyboard(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("the form did not open on the section list")
+	}
+	drawPrimitiveAt(t, fm.Root(), 100, 40)
+	focused := fm.sectionRail.GetText(false)
+	if !strings.Contains(focused, app.themeTags.Selection) {
+		t.Fatalf("the open section is not on the cursor line while the list has the keyboard: %q", focused)
+	}
+
+	fm.enterSection()
+	drawPrimitiveAt(t, fm.Root(), 100, 40)
+	blurred := fm.sectionRail.GetText(false)
+	if blurred == focused {
+		t.Fatalf("the section list looks the same with and without the keyboard: %q", blurred)
+	}
+	if strings.Contains(blurred, app.themeTags.Selection) {
+		t.Fatalf("the cursor line stayed on the list after the fields took the keyboard: %q", blurred)
+	}
+}
+
+// TestAClickOnTheFieldsDoesNotPickASection guards the rail's mouse capture:
+// tview runs a capture before the handler's own bounds test and a Flex offers
+// the press to every child, so a click on the first field used to jump pages.
+func TestAClickOnTheFieldsDoesNotPickASection(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 110, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+	drawPrimitiveAt(t, fm.Root(), 110, 40)
+
+	railX, railY, railWidth, _ := fm.sectionRail.GetRect()
+	handler := fm.Root().MouseHandler()
+
+	// A press well to the right of the rail, on the row the second section
+	// sits on in the list.
+	press := tcell.NewEventMouse(railX+railWidth+20, railY+railTopPad+1, tcell.Button1, tcell.ModNone)
+	handler(tview.MouseLeftDown, press, func(tview.Primitive) {})
+	if fm.activeSection != 0 {
+		t.Fatalf("a click on the fields opened section %d", fm.activeSection)
+	}
+
+	// And a press on the rail itself still picks the row under it.
+	onRail := tcell.NewEventMouse(railX+1, railY+railTopPad+1, tcell.Button1, tcell.ModNone)
+	handler(tview.MouseLeftDown, onRail, func(tview.Primitive) {})
+	if fm.activeSection != 1 {
+		t.Fatalf("a click on the rail's second row opened section %d", fm.activeSection)
+	}
+}
+
+// TestTheNavKeepsFocusWhenAPageIsAddedOrRemoved guards the open focus against
+// tview's own focus walk: Pages re-delegates down the tree on every page add
+// and remove, taking whichever child the body flagged. Flagged on the rows, it
+// landed on the first field and took the keyboard off the list Show had just
+// given it.
+func TestTheNavKeepsFocusWhenAPageIsAddedOrRemoved(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 110, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("First")
+	alpha := fm.AddInput("Alpha", "")
+	fm.BeginSection("Second")
+	fm.AddInput("Bravo", "")
+	fm.Show("form_test")
+
+	if !fm.railHasFocus() {
+		t.Fatal("the form did not open on the section list")
+	}
+
+	// Any page coming or going re-delegates focus through the modal's tree.
+	app.pages.AddPage("decoy", tview.NewBox(), true, false)
+	app.pages.RemovePage("decoy")
+	if got := app.app.GetFocus(); got == alpha {
+		t.Fatal("a page add and remove moved the keyboard onto the first field")
+	}
+	if !fm.railHasFocus() {
+		t.Fatalf("the section list lost the keyboard to %T", app.app.GetFocus())
+	}
+}
+
+// TestTheSidebarHoldsTheButtonsAndTheRulesMeet covers the settings chrome: the
+// actions sit under the section list rather than across the panel, and the
+// column rule closes into the footer rule in a tee. The tee is the part that
+// broke first, because a Flex defers a focused child's draw and the footer had
+// no rect to read.
+func TestTheSidebarHoldsTheButtonsAndTheRulesMeet(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 34)
+
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	lines := drawPrimitiveAt(t, fm.Root(), 100, 34)
+	screen := strings.Join(lines, "\n")
+
+	hint, footer, save := -1, -1, -1
+	for i, line := range lines {
+		switch {
+		case strings.Contains(line, "Esc cancel"):
+			hint = i
+		case strings.Contains(line, "├") && strings.Contains(line, "┴"):
+			footer = i
+		case strings.Contains(line, "Save"):
+			save = i
+		}
+	}
+	if footer < 0 {
+		t.Fatalf("the column rule does not close into the footer rule in a tee:\n%s", screen)
+	}
+	if hint < 0 || footer != hint-1 {
+		t.Fatalf("the rule does not sit directly above the hint:\n%s", screen)
+	}
+	if save < 0 || save >= footer {
+		t.Fatalf("the buttons are not inside the sidebar, above the rule:\n%s", screen)
+	}
+	top := -1
+	for i, line := range lines {
+		if strings.Contains(line, "┌") {
+			top = i
+			break
+		}
+	}
+	if top < 0 || !strings.Contains(lines[top], "┬") {
+		t.Fatalf("the column rule does not tee into the top border:\n%s", screen)
+	}
+
+	// The buttons belong to the sidebar, so they sit left of the column rule.
+	column := strings.Index(lines[footer], "┴")
+	if got := strings.Index(lines[save], "Save"); got < 0 || got > column {
+		t.Fatalf("Save is at column %d, right of the rule at %d:\n%s", got, column, screen)
+	}
+}
+
+// TestASectionedFormSurvivesCrossingTheRailThreshold guards the frame against
+// the width: where the buttons sit depends on whether the sidebar has a
+// column, so composing the frame once left them mounted in a row the panel no
+// longer held, or in both at once.
+func TestASectionedFormSurvivesCrossingTheRailThreshold(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	fm := NewFormModal(app, "Test")
+	fm.SetMaxWidth(82)
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(FormButton{Label: "Save"}, FormButton{Label: "Cancel"})
+	fm.SetHint("Esc cancel")
+	fm.Show("form_test")
+
+	for _, width := range []int{100, 56, 100, 56, 100} {
+		app.pages.SetRect(0, 0, width, 40)
+		lines := drawPrimitiveAt(t, fm.Root(), width, 40)
+		screen := strings.Join(lines, "\n")
+
+		if strings.Count(screen, "Save") != 1 {
+			t.Fatalf("at %d columns Save drew %d times, want once:\n%s",
+				width, strings.Count(screen, "Save"), screen)
+		}
+		if strings.Count(screen, "Cancel") != 1 {
+			t.Fatalf("at %d columns Cancel drew %d times, want once:\n%s",
+				width, strings.Count(screen, "Cancel"), screen)
+		}
+		if !strings.Contains(screen, "Esc cancel") {
+			t.Fatalf("at %d columns the hint is gone:\n%s", width, screen)
+		}
+		if !strings.Contains(screen, "ALPHA") {
+			t.Fatalf("at %d columns the open section's field is gone:\n%s", width, screen)
+		}
+	}
+}
+
+// TestTheColumnRuleLeavesTheContextRowAlone covers the one line that says which
+// fields the environment owns: the rule runs to the top border, and the context
+// row sits between that border and the body.
+func TestTheColumnRuleLeavesTheContextRowAlone(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 40)
+
+	notice := "theme and log level are set by the environment"
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.SetContext(notice)
+	fm.Show("form_test")
+
+	for _, line := range drawPrimitiveAt(t, fm.Root(), 100, 40) {
+		if strings.Contains(line, "environment") {
+			if !strings.Contains(line, notice) {
+				t.Fatalf("the column rule struck through the context row: %q", line)
+			}
+			return
+		}
+	}
+	t.Fatal("the context row did not draw")
+}
+
+// TestTheArrowsWalkTheWholeSidebar covers the sidebar as one column: the
+// sections and the buttons stacked under them move together, so the actions
+// are reachable without tabbing through a section's fields.
+func TestTheArrowsWalkTheWholeSidebar(t *testing.T) {
+	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 100, 34)
+
+	saved := false
+	fm := NewFormModal(app, "Test")
+	fm.BeginSection("Appearance")
+	fm.AddInput("Alpha", "")
+	fm.BeginSection("Logging")
+	fm.AddInput("Bravo", "")
+	fm.AddButtons(
+		FormButton{Label: "Save", OnPress: func() { saved = true }},
+		FormButton{Label: "Cancel"},
+	)
+	fm.Show("form_test")
+
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	up := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+
+	fm.HandleKey(down) // Appearance -> Logging
+	if fm.activeSection != 1 {
+		t.Fatalf("first Down left the section at %d", fm.activeSection)
+	}
+	fm.HandleKey(down) // Logging -> Save
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Down off the last section reached button %d, want Save", got)
+	}
+	fm.HandleKey(down) // Save -> Cancel
+	if got := fm.focusedButton(); got != 1 {
+		t.Fatalf("Down off Save reached button %d, want Cancel", got)
+	}
+
+	fm.HandleKey(up) // Cancel -> Save
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Up off Cancel reached button %d, want Save", got)
+	}
+	fm.HandleKey(up) // Save -> the list, on the last section
+	if !fm.railHasFocus() {
+		t.Fatal("Up off the first button did not go back to the section list")
+	}
+	if fm.activeSection != 1 {
+		t.Fatalf("coming back off the buttons opened section %d, want the last one", fm.activeSection)
+	}
+
+	// And Enter on a button presses it rather than crossing into the fields.
+	fm.HandleKey(down)
+	if got := fm.focusedButton(); got != 0 {
+		t.Fatalf("Down from the last section reached button %d, want Save", got)
+	}
+	enter := tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)
+	// The form leaves Enter to the focused widget, the way the dispatcher does.
+	if left := fm.HandleKey(enter); left != nil {
+		if handler := app.app.GetFocus().InputHandler(); handler != nil {
+			handler(left, func(tview.Primitive) {})
+		}
+	}
+	if !saved {
+		t.Fatal("Enter on Save did not press it")
 	}
 }

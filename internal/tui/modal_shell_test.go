@@ -24,6 +24,9 @@ func panelTitleRow(t *testing.T, wrapper *tview.Flex, title string, width, heigh
 // A panel's size is fixed where centerModal put it, so a terminal that shrank
 // under an open modal used to hand the column one taller than itself.
 func TestACenteredModalRefitsWhenTheTerminalResizes(t *testing.T) {
+	// FormModal builds its own shell, so it needs a handle the table can reach
+	// from both halves of its case.
+	var refitForm *FormModal
 	for _, tc := range []struct {
 		name    string
 		open    func(*App)
@@ -41,11 +44,19 @@ func TestACenteredModalRefitsWhenTheTerminalResizes(t *testing.T) {
 		{"palette", (*App).openPalette, func(a *App) *tview.Flex { return a.paletteModal }, "Commands"},
 		{"agent_output", func(a *App) { a.agentOutputModal.Show("Agent", func() {}) },
 			func(a *App) *tview.Flex { return a.agentOutputModal.modal }, "Agent"},
+		{"form", func(a *App) {
+			for _, label := range []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo"} {
+				refitForm.AddInput(label, "")
+			}
+			refitForm.AddButtons(FormButton{Label: "Save"})
+			refitForm.Show("form_refit")
+		}, func(*App) *tview.Flex { return refitForm.Root() }, "Form"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			app := newUXTestApp(t)
 			app.focusedPane = FocusIssues
 			app.pages.SetRect(0, 0, 100, 40)
+			refitForm = NewFormModal(app, "Form")
 			tc.open(app)
 
 			for _, size := range []struct{ width, height int }{

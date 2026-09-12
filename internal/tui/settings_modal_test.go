@@ -123,24 +123,45 @@ func TestSettingsFormRoundTripsFlags(t *testing.T) {
 // settings pickers. Consecutive AddPicker calls pack into one row, so dropping
 // an EndRow silently squeezes every picker into a single row and clips the
 // labels and values rather than failing.
-func TestSettingsPickersSpanMultipleRows(t *testing.T) {
+func TestSettingsSectionsHoldEveryFieldAndKeepOneHeight(t *testing.T) {
 	app := newUXTestApp(t)
+	app.pages.SetRect(0, 0, 110, 40)
 	sm := app.settingsModal
+	fm := sm.fm
 
-	widest := 0
-	for _, row := range sm.fm.rows {
-		if row.columns > widest {
-			widest = row.columns
+	if len(fm.sections) < 2 {
+		t.Fatal("the settings form is not sectioned")
+	}
+	for i, row := range fm.rows {
+		if row.section < 0 {
+			t.Fatalf("row %d belongs to no section, so no rail entry reaches it", i)
 		}
 	}
-	if widest > 3 {
-		t.Fatalf("widest picker row = %d columns, want at most 3: the settings pickers lost a row break and will clip", widest)
+
+	// The panel must not resize under the reader as they step sections.
+	want := fm.contentHeight(40)
+	for i := range fm.sections {
+		fm.activeSection = i
+		if got := fm.contentHeight(40); got != want {
+			t.Fatalf("section %q sizes the panel to %d, but %q sizes it to %d",
+				fm.sections[i].name, got, fm.sections[0].name, want)
+		}
+	}
+
+	// And every section fits that one height without scrolling.
+	for i := range fm.sections {
+		fm.activeSection = i
+		rows := 0
+		for _, h := range fm.rowHeights(40) {
+			rows += h
+		}
+		if rows > want-fm.chromeHeight() {
+			t.Fatalf("section %q needs %d rows past the %d the panel holds",
+				fm.sections[i].name, rows, want-fm.chromeHeight())
+		}
 	}
 }
 
-// The log path is the one setting whose default is machine-specific. Showing it
-// resolved is right — the field should name where logs really go — but saving
-// it back verbatim is what pinned a shared config.json to one machine's home.
 func TestSettingsFormDropsTheMachineDefaultLogPath(t *testing.T) {
 	isolateLogging(t)
 
